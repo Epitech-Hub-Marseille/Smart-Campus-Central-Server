@@ -1,6 +1,9 @@
 import {
   Building2,
   Images,
+  CalendarDays,
+  MonitorPlay,
+  UserCheck,
   DoorOpen,
   FileUp,
   GraduationCap,
@@ -55,6 +58,8 @@ function navGroups(manager: boolean): { title: string; items: NavItem[] }[] {
         { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
         { to: "/rooms", label: "Rooms", icon: DoorOpen },
         { to: "/buildings", label: "Buildings", icon: Building2 },
+        { to: "/reservations", label: "Reservations", icon: CalendarDays },
+        { to: "/availability", label: "Availability", icon: UserCheck },
       ],
     },
     ...(manager
@@ -66,6 +71,7 @@ function navGroups(manager: boolean): { title: string; items: NavItem[] }[] {
               { to: "/emergency", label: "Emergency", icon: Siren },
               { to: "/announcements", label: "Announcements", icon: Megaphone },
               { to: "/intercom", label: "InterCom", icon: Volume2 },
+              { to: "/faculty", label: "Faculty screens", icon: MonitorPlay },
               { to: "/content", label: "Custom content", icon: Images },
               { to: "/statuses", label: "Room statuses", icon: Tags },
             ],

@@ -47,6 +47,19 @@ const schema = z.object({
   // Enrollment requests per address per 15 minutes (the endpoint is public). Raise it for protocol test runs.
   ENROLL_RATE_LIMIT: z.coerce.number().int().positive().default(20),
 
+  // Time zone of the campus: schedules ("every day at 08:00") and the reservations day are read in it.
+  CAMPUS_TIMEZONE: z
+    .string()
+    .default("Europe/Paris")
+    .refine((tz) => {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: tz });
+        return true;
+      } catch {
+        return false;
+      }
+    }, "unknown time zone"),
+
   // Text-to-speech engine (any server speaking the OpenAI `/audio/speech` API, hosted or self-hosted).
   // Without TTS_URL the voice features answer 501 and the console hides them.
   TTS_URL: z.string().url().optional(),

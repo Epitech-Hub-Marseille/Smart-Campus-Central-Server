@@ -39,6 +39,17 @@ export interface Room {
   building: { id: string; code: string; name: string };
 }
 
+/** Mirrors SERVICES and AVAILABILITIES of @smartcampus/protocol. */
+export const SERVICES = ["pedagogical", "administrative"] as const;
+export type Service = (typeof SERVICES)[number];
+export const SERVICE_LABEL: Record<Service, string> = { pedagogical: "Pedagogical", administrative: "Administrative" };
+
+export const AVAILABILITIES = ["available", "busy", "away", "absent"] as const;
+export type Availability = (typeof AVAILABILITIES)[number];
+export const AVAILABILITY_LABEL: Record<Availability, string> = { available: "Available", busy: "Busy", away: "Away", absent: "Absent" };
+/** Status dots. Chosen per meaning, like the room statuses: they are data, not chrome. */
+export const AVAILABILITY_COLOR: Record<Availability, string> = { available: "#00a86b", busy: "#e5484d", away: "#f5a524", absent: "#8a9a92" };
+
 export interface StaffMember {
   id: string;
   email: string | null;
@@ -47,6 +58,8 @@ export interface StaffMember {
   groups: Group[];
   cardUid: string | null;
   department: string;
+  /** Faculty directory: set to appear on the Faculty screens. */
+  service: Service | null;
   jobTitle: string;
   phone: string;
   disabled: boolean;
@@ -220,7 +233,7 @@ export interface DisplayConfig {
   layout: "standard" | "compact" | "split";
   theme: "dark" | "light";
   accentColor: string;
-  show: { roomName: boolean; building: boolean; floor: boolean; capacity: boolean; clock: boolean; announcements: boolean };
+  show: { roomName: boolean; building: boolean; floor: boolean; capacity: boolean; clock: boolean; announcements: boolean; nextReservation: boolean };
   sleep: TimeWindow;
 }
 
@@ -228,7 +241,7 @@ export const DEFAULT_DISPLAY_CONFIG: DisplayConfig = {
   layout: "standard",
   theme: "dark",
   accentColor: "#00a86b",
-  show: { roomName: true, building: true, floor: true, capacity: true, clock: true, announcements: true },
+  show: { roomName: true, building: true, floor: true, capacity: true, clock: true, announcements: true, nextReservation: true },
   sleep: { enabled: false, from: "22:00", to: "06:00" },
 };
 
@@ -329,6 +342,90 @@ export interface VoiceCatalogue {
 
 /** "fr" -> "French", in the browser's language. */
 export const languageName = (code: string) => new Intl.DisplayNames(undefined, { type: "language" }).of(code) ?? code;
+
+// ---- Faculty and reservations ----------------------------------------------------------------
+
+export interface NewsItem {
+  id: string;
+  title: string;
+  text: string;
+  priority: AnnouncePriority;
+  publishedAt: string;
+  expiresAt: string | null;
+  expired: boolean;
+  createdBy: string;
+}
+
+export interface StaffAvailability {
+  id: string;
+  name: string;
+  jobTitle: string;
+  service: Service | null;
+  availability: Availability;
+  note: string;
+  until: string | null;
+  updatedAt: string | null;
+}
+
+export const FACULTY_SLIDES = ["news", "staff", "reservations"] as const;
+export type FacultySlide = (typeof FACULTY_SLIDES)[number];
+export const SLIDE_LABEL: Record<FacultySlide, string> = { news: "News", staff: "Staff availability", reservations: "Room reservations" };
+
+/** What a Faculty screen shows: the information board, the custom content, or both taking turns. */
+export const FACULTY_MODES = ["default", "custom", "mixed"] as const;
+export type FacultyMode = (typeof FACULTY_MODES)[number];
+export const MODE_LABEL: Record<FacultyMode, string> = {
+  default: "Information board",
+  custom: "Custom content only",
+  mixed: "Both, taking turns",
+};
+
+export interface AssetRef {
+  assetId: string;
+  sha256: string;
+  size: number;
+  mime: string;
+}
+
+export interface FacultySite {
+  name: string;
+  subtitle: string;
+  zone: string;
+  assemblyPoint: string;
+  emergencyNumber: string;
+  logo: AssetRef | null;
+}
+
+export interface FacultyConfig {
+  mode: FacultyMode;
+  site: FacultySite;
+  service: "all" | Service;
+  carousel: { enabled: boolean; intervalSeconds: number; slides: FacultySlide[] };
+  widgets: { clock: boolean; date: boolean; weather: boolean };
+  weather: { label: string; latitude: number; longitude: number } | null;
+}
+
+export interface FacultyDisplay {
+  id: string;
+  name: string;
+  online: boolean;
+  config: FacultyConfig;
+}
+
+export interface Reservation {
+  id: string;
+  roomId: string;
+  room: { code: string; name: string; building: string } | null;
+  title: string;
+  start: string;
+  end: string;
+  organizerId: string;
+  organizer: string;
+  status: "active" | "cancelled";
+}
+
+/** Value for an `<input type="datetime-local">` (local time, no zone) from a date. */
+export const toLocalInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 
 // ---- Custom content ------------------------------------------------------------------------------
 

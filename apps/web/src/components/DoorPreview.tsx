@@ -17,6 +17,13 @@ export interface PreviewStatus {
   icon: StatusIconName;
 }
 
+export interface PreviewReservation {
+  id: string;
+  title: string;
+  start: number;
+  end: number;
+}
+
 export interface PreviewAnnouncement {
   id: string;
   title?: string;
@@ -49,12 +56,14 @@ export function DoorPreview({
   room,
   status,
   announcements,
+  reservations = [],
   config = DEFAULT_DISPLAY_CONFIG,
   online,
 }: {
   room: PreviewRoom | null;
   status: PreviewStatus | null;
   announcements: PreviewAnnouncement[];
+  reservations?: PreviewReservation[];
   config?: DisplayConfig;
   online: boolean;
 }) {
@@ -62,6 +71,8 @@ export function DoorPreview({
   const theme = THEMES[config.theme];
   const asleep = isInWindow(config.sleep, now);
   const banner = config.show.announcements ? [...announcements].sort((a, b) => priorityRank(b.priority) - priorityRank(a.priority))[0] : undefined;
+  // The current or next booking that has not ended. A past one drops off by itself, like on the real screen.
+  const next = config.show.nextReservation ? [...reservations].sort((a, b) => a.start - b.start).find((r) => r.end > now.getTime()) : undefined;
   const bannerColor = banner ? PRIORITY_COLOR[banner.priority] || config.accentColor : config.accentColor;
 
   return (
@@ -78,7 +89,7 @@ export function DoorPreview({
           <div className="flex h-full flex-col p-[4%] text-[min(2.2vw,13px)]">
             {config.layout === "split" ? (
               <div className="grid flex-1 grid-cols-2 gap-[4%]">
-                <RoomBlock room={room} status={status} config={config} theme={theme} now={now} />
+                <RoomBlock room={room} status={status} config={config} theme={theme} now={now} next={next} />
                 <div className="flex flex-col gap-2 overflow-hidden rounded-xl p-[6%]" style={{ backgroundColor: theme.surface }}>
                   <div style={{ color: theme.muted }}>Announcements</div>
                   {announcements.length === 0 && <div style={{ color: theme.muted }}>Nothing to show.</div>}
@@ -89,7 +100,7 @@ export function DoorPreview({
               </div>
             ) : (
               <>
-                <RoomBlock room={room} status={status} config={config} theme={theme} now={now} compact={config.layout === "compact"} />
+                <RoomBlock room={room} status={status} config={config} theme={theme} now={now} next={next} compact={config.layout === "compact"} />
                 {banner && <Banner announcement={banner} color={bannerColor} className="mt-[3%]" />}
               </>
             )}
@@ -114,8 +125,10 @@ function RoomBlock({
   config,
   theme,
   now,
+  next,
   compact,
 }: {
+  next?: PreviewReservation;
   room: PreviewRoom | null;
   status: PreviewStatus | null;
   config: DisplayConfig;
@@ -142,6 +155,12 @@ function RoomBlock({
         {status && <StatusIcon name={status.icon} className="size-[2.2em]" />}
         <span className={compact ? "text-[1.8em]" : "text-[2.4em]"}>{status?.label ?? "No status"}</span>
       </div>
+      {next && (
+        <div className="truncate" style={{ color: theme.muted }}>
+          {next.start <= now.getTime() ? "Now" : "Next"}: <span style={{ color: theme.text }}>{next.title}</span>,{" "}
+          {new Date(next.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} to {new Date(next.end).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+        </div>
+      )}
       <div className="flex items-end justify-between" style={{ color: theme.muted }}>
         <span>{config.show.capacity && room?.capacity != null ? `${room.capacity} seats` : " "}</span>
         {config.show.clock && <span className="text-[1.6em] font-medium" style={{ color: theme.text }}>{now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}

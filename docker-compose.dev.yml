@@ -59,6 +59,7 @@ services:
       ENROLL_RATE_LIMIT: "1000"
       GATEWAY_CONNECTS_PER_MINUTE: "1000"
       # Voice announcements: set TTS_URL in your shell or .env to try them.
+      CAMPUS_TIMEZONE: ${CAMPUS_TIMEZONE:-}
       TTS_URL: ${TTS_URL:-}
       TTS_API_KEY: ${TTS_API_KEY:-}
       TTS_VOICES: ${TTS_VOICES:-}
