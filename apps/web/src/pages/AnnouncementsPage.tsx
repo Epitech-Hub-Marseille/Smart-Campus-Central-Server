@@ -1,6 +1,7 @@
 import { Megaphone, Plus, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { ErrorText, Field } from "@/components/Field";
+import { TemplatePicker } from "@/components/TemplatePicker";
 import { PageHeader } from "@/components/PageHeader";
 import { emptyTargetState, TargetPicker, toTargets, type TargetState } from "@/components/TargetPicker";
 import { Badge } from "@/components/ui/badge";
@@ -138,6 +139,10 @@ function AnnouncementDialog({ onClose, onSent }: { onClose: () => void; onSent: 
           <DialogTitle>New announcement</DialogTitle>
         </DialogHeader>
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
+          <TemplatePicker
+            id="a-template"
+            onPick={(t) => setForm((f) => ({ ...f, title: t.title, text: t.text, priority: t.priority }))}
+          />
           <Field label="Title (optional)" htmlFor="a-title">
             <Input id="a-title" maxLength={200} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
           </Field>

@@ -7,6 +7,8 @@ import { AvailabilityPage } from "@/pages/AvailabilityPage";
 import { ContentPage } from "@/pages/ContentPage";
 import { FacultyPage } from "@/pages/FacultyPage";
 import { ReservationsPage } from "@/pages/ReservationsPage";
+import { SchedulesPage } from "@/pages/SchedulesPage";
+import { TemplatesPage } from "@/pages/TemplatesPage";
 import { AnnouncementsPage } from "@/pages/AnnouncementsPage";
 import { BuildingsPage } from "@/pages/BuildingsPage";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -44,6 +46,8 @@ export default function App() {
                 <Route path="/emergency" element={<EmergencyPage />} />
                 <Route path="/announcements" element={<AnnouncementsPage />} />
                 <Route path="/intercom" element={<IntercomPage />} />
+                <Route path="/schedules" element={<SchedulesPage />} />
+                <Route path="/templates" element={<TemplatesPage />} />
                 <Route path="/content" element={<ContentPage />} />
                 <Route path="/faculty" element={<FacultyPage />} />
                 <Route path="/statuses" element={<StatusesPage />} />
