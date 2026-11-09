@@ -202,6 +202,7 @@ export interface Announcement {
 export interface Asset {
   id: string;
   name: string;
+  kind: "audio" | "image" | "video";
   mime: string;
   size: number;
   sha256: string;
@@ -328,3 +329,28 @@ export interface VoiceCatalogue {
 
 /** "fr" -> "French", in the browser's language. */
 export const languageName = (code: string) => new Intl.DisplayNames(undefined, { type: "language" }).of(code) ?? code;
+
+// ---- Custom content ------------------------------------------------------------------------------
+
+export const CONTENT_KINDS = ["image", "video", "text", "web"] as const;
+export type ContentKind = (typeof CONTENT_KINDS)[number];
+export const CONTENT_KIND_LABEL: Record<ContentKind, string> = { image: "Image", video: "Video", text: "Text", web: "Web page" };
+
+export interface ContentSlide {
+  id: string;
+  kind: ContentKind;
+  title: string;
+  text: string | null;
+  url: string | null;
+  refreshSeconds: number | null;
+  assetId: string | null;
+  durationSeconds: number;
+  fit: "contain" | "cover";
+  startsAt: string | null;
+  endsAt: string | null;
+  targets: Targets;
+  enabled: boolean;
+  state: "live" | "scheduled" | "over" | "paused";
+  displayCount: number;
+  createdBy: string;
+}

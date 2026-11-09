@@ -3,6 +3,7 @@ import { AuthProvider } from "@/auth/AuthContext";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
 import { AppLayout } from "@/components/AppLayout";
 import { EmergencyPage } from "@/pages/EmergencyPage";
+import { ContentPage } from "@/pages/ContentPage";
 import { AnnouncementsPage } from "@/pages/AnnouncementsPage";
 import { BuildingsPage } from "@/pages/BuildingsPage";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -38,6 +39,7 @@ export default function App() {
                 <Route path="/emergency" element={<EmergencyPage />} />
                 <Route path="/announcements" element={<AnnouncementsPage />} />
                 <Route path="/intercom" element={<IntercomPage />} />
+                <Route path="/content" element={<ContentPage />} />
                 <Route path="/statuses" element={<StatusesPage />} />
                 <Route path="/staff" element={<StaffPage />} />
                 <Route path="/students" element={<StudentsPage />} />

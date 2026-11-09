@@ -1,5 +1,6 @@
 import {
   Building2,
+  Images,
   DoorOpen,
   FileUp,
   GraduationCap,
@@ -65,6 +66,7 @@ function navGroups(manager: boolean): { title: string; items: NavItem[] }[] {
               { to: "/emergency", label: "Emergency", icon: Siren },
               { to: "/announcements", label: "Announcements", icon: Megaphone },
               { to: "/intercom", label: "InterCom", icon: Volume2 },
+              { to: "/content", label: "Custom content", icon: Images },
               { to: "/statuses", label: "Room statuses", icon: Tags },
             ],
           },
