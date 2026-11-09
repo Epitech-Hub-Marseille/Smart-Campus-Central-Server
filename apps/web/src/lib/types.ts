@@ -298,3 +298,22 @@ export interface RegistrationSession {
 
 /** Card serial numbers read as one hex string are easier to compare in pairs: 04 A2 2B 1C. */
 export const formatCardUid = (uid: string) => (uid.match(/.{1,2}/g) ?? []).join(" ");
+
+// ---- Voice, templates, schedules ---------------------------------------------------------------
+
+export interface Voice {
+  id: string;
+  label: string;
+  language: string;
+}
+
+export interface VoiceCatalogue {
+  enabled: boolean;
+  maxChars: number;
+  voices: Voice[];
+  /** Voice that reads emergencies aloud. */
+  emergencyVoice: string | null;
+}
+
+/** "fr" -> "French", in the browser's language. */
+export const languageName = (code: string) => new Intl.DisplayNames(undefined, { type: "language" }).of(code) ?? code;

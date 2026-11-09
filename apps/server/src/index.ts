@@ -3,11 +3,15 @@ import { formatFingerprint } from "@smartcampus/handshake";
 import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { attachGateway } from "./gateway/index.js";
+import { ttsEngine } from "./infra/tts.js";
 import { loadServerKey } from "./infra/serverKey.js";
 import { seedRoomStatuses } from "./domain/roomStatus.js";
 import { DeviceModel } from "./models/device.js";
 import { migrateUsers } from "./migrate.js";
 import { seedAdmin } from "./seed.js";
+
+// Fail at start, not on the first emergency read-out, when the voice list is malformed.
+ttsEngine();
 
 const serverKey = loadServerKey();
 console.log(`Gateway key fingerprint: ${formatFingerprint(serverKey.fingerprint)}`);
