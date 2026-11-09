@@ -343,6 +343,47 @@ export interface VoiceCatalogue {
 /** "fr" -> "French", in the browser's language. */
 export const languageName = (code: string) => new Intl.DisplayNames(undefined, { type: "language" }).of(code) ?? code;
 
+export interface AnnouncementTemplate {
+  id: string;
+  name: string;
+  kind: "text" | "voice";
+  title: string;
+  text: string;
+  priority: AnnouncePriority;
+  voice: string;
+  createdBy: string;
+  updatedAt: string;
+}
+
+export type ScheduleTrigger =
+  | { type: "once"; at: string }
+  | { type: "daily"; time: string }
+  | { type: "weekly"; time: string; days: number[] }
+  | { type: "status"; status: string; roomId?: string };
+
+export interface Schedule {
+  id: string;
+  name: string;
+  content: { kind: "text" | "voice"; title: string; text: string; priority: AnnouncePriority; voice: string; expiresAfterMinutes?: number };
+  trigger: ScheduleTrigger;
+  targets: Targets | null;
+  enabled: boolean;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastError: string | null;
+  runCount: number;
+  createdBy: string;
+}
+
+export const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+
+export function describeTrigger(t: ScheduleTrigger, statusLabel: (key: string) => string = (k) => k): string {
+  if (t.type === "once") return `Once, ${new Date(t.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
+  if (t.type === "daily") return `Every day at ${t.time}`;
+  if (t.type === "weekly") return `${t.days.map((d) => WEEKDAYS[d]!.slice(0, 3)).join(", ")} at ${t.time}`;
+  return `When ${t.roomId ? "that room" : "a room"} becomes "${statusLabel(t.status)}"`;
+}
+
 // ---- Faculty and reservations ----------------------------------------------------------------
 
 export interface NewsItem {

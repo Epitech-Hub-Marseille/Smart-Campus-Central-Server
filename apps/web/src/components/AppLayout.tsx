@@ -1,7 +1,9 @@
 import {
   Building2,
+  CalendarClock,
   Images,
   CalendarDays,
+  FileText,
   MonitorPlay,
   UserCheck,
   DoorOpen,
@@ -71,6 +73,8 @@ function navGroups(manager: boolean): { title: string; items: NavItem[] }[] {
               { to: "/emergency", label: "Emergency", icon: Siren },
               { to: "/announcements", label: "Announcements", icon: Megaphone },
               { to: "/intercom", label: "InterCom", icon: Volume2 },
+              { to: "/schedules", label: "Schedules", icon: CalendarClock },
+              { to: "/templates", label: "Templates", icon: FileText },
               { to: "/faculty", label: "Faculty screens", icon: MonitorPlay },
               { to: "/content", label: "Custom content", icon: Images },
               { to: "/statuses", label: "Room statuses", icon: Tags },
