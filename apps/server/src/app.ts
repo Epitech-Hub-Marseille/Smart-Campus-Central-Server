@@ -12,6 +12,7 @@ import { assetsRouter } from "./routes/assets.js";
 import { authRouter } from "./routes/auth.js";
 import { cardRegistrationRouter } from "./routes/cardRegistration.js";
 import { buildingsRouter } from "./routes/buildings.js";
+import { contentRouter } from "./routes/content.js";
 import { devicesRouter, enrollRouter } from "./routes/devices.js";
 import { emergenciesRouter } from "./routes/emergencies.js";
 import { importRouter } from "./routes/import.js";
@@ -59,6 +60,7 @@ export function createApp(options: { serverPublicKey?: string } = {}) {
   api.use("/devices", devicesRouter);
   api.use("/buildings", buildingsRouter);
   api.use("/announcements", announcementsRouter);
+  api.use("/content", contentRouter);
   api.use("/assets", assetsRouter);
   api.use("/emergencies", emergenciesRouter);
   api.use("/intercom", intercomRouter);

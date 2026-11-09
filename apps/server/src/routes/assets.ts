@@ -1,9 +1,10 @@
 import { verifyRequest } from "@smartcampus/handshake";
 import express, { Router } from "express";
 import { rateLimit } from "express-rate-limit";
+import { z } from "zod";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { config } from "../config.js";
-import { deleteAsset, storeAudioAsset, wasAssetSentTo } from "../domain/assets.js";
+import { deleteAsset, storeAudioAsset, storeMediaAsset, wasAssetSentTo } from "../domain/assets.js";
 import { activePublicKey } from "../domain/devices.js";
 import { openFile } from "../infra/gridfs.js";
 import { HttpError } from "../lib/errors.js";
@@ -13,6 +14,9 @@ export const assetsRouter = Router();
 
 /** The console uploads with a raw body; the real check is the content sniffing in storeAudioAsset. */
 const rawUpload = express.raw({ type: () => true, limit: `${config.MAX_AUDIO_MB}mb` });
+
+/** Images and videos are bigger than sounds, so they have their own limit. */
+const rawMedia = express.raw({ type: () => true, limit: `${config.MAX_MEDIA_MB}mb` });
 
 const downloadLimiter = rateLimit({
   windowMs: 60_000,
@@ -60,8 +64,19 @@ assetsRouter.use(requireAuth);
 
 const canWrite = requireRole("admin", "operator");
 
-assetsRouter.get("/", async (_req, res) => {
-  res.json({ items: (await AssetModel.find().sort({ createdAt: -1 }).limit(200)).map(assetDto) });
+assetsRouter.get("/", async (req, res) => {
+  // Without a kind, the sound library, as before: a screen that lists sounds must not suddenly list videos.
+  const kind = z.enum(["audio", "image", "video"]).default("audio").parse(req.query.kind);
+  const filter = kind === "audio" ? { $or: [{ kind: "audio" }, { kind: { $exists: false } }] } : { kind };
+  res.json({ items: (await AssetModel.find(filter).sort({ createdAt: -1 }).limit(200)).map(assetDto) });
+});
+
+/** Upload to the content library. The kind (image or video) is decided from the file itself. */
+assetsRouter.post("/media", canWrite, rawMedia, async (req, res) => {
+  const name = typeof req.query.name === "string" ? req.query.name.trim().slice(0, 100) : "";
+  if (!name) throw new HttpError(400, "name is required");
+  if (!Buffer.isBuffer(req.body)) throw new HttpError(400, "Send the file as the request body");
+  res.status(201).json(assetDto(await storeMediaAsset(req.body, name, req.user!)));
 });
 
 assetsRouter.post("/", canWrite, rawUpload, async (req, res) => {

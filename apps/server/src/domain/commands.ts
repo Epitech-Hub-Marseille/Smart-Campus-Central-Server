@@ -12,6 +12,7 @@ const STATE_COMMAND_TYPES: readonly CommandType[] = [
   "room.status.set",
   "room.info.set",
   "display.config.set",
+  "content.set",
   "audio.settings.set",
   "registration.mode.set",
 ];
