@@ -278,6 +278,17 @@ export interface Emergency {
   startedAt: string;
   clearedBy: string | null;
   clearedAt: string | null;
+  endMessage: string | null;
+  endNoticeSeconds: number | null;
+  voice: { status: "none" | "sent" | "failed" | "unavailable"; error: string | null };
+}
+
+/** Answer of the first step of a real alert. */
+export interface EmergencyConfirmation {
+  confirmation: string;
+  expiresAt: string;
+  deviceCount: number;
+  title: string;
 }
 
 export interface EmergencyDelivery {
