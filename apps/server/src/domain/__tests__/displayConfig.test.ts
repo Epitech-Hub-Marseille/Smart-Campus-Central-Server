@@ -22,7 +22,7 @@ const config = {
   layout: "compact",
   theme: "light",
   accentColor: "#112233",
-  show: { roomName: true, building: false, floor: false, capacity: false, clock: true, announcements: true },
+  show: { roomName: true, building: false, floor: false, capacity: false, clock: true, announcements: true, nextReservation: true },
   sleep: { enabled: true, from: "21:30", to: "06:15" },
 };
 

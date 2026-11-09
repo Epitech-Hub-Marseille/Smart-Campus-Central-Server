@@ -8,6 +8,7 @@ import { RoomStatusChangeModel } from "../models/roomStatusChange.js";
 import { RoomModel } from "../models/room.js";
 import type { PublicUser } from "../models/user.js";
 import { enqueueCommand } from "./commands.js";
+import { pushReservationsToDevice } from "./reservations.js";
 
 type Actor = Pick<PublicUser, "id" | "name">;
 
@@ -52,6 +53,7 @@ export async function pushRoomToDevice(deviceId: string, roomId: string): Promis
     capacity: room.capacity ?? null,
   });
   if (status) await enqueueCommand(deviceId, "room.status.set", statusPayload(roomId, status, room.statusSince));
+  await pushReservationsToDevice(deviceId, roomId);
 }
 
 export async function pushRoomToItsDevices(roomId: string): Promise<void> {

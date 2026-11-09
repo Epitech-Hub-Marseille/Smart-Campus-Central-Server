@@ -5,7 +5,7 @@ import { useParams } from "react-router-dom";
 import { AudioSettingsCard } from "@/components/AudioSettingsCard";
 import { ConnectionBadge } from "@/components/DeviceBadges";
 import { DisplayConfigEditor } from "@/components/DisplayConfigEditor";
-import { DoorPreview, type PreviewAnnouncement, type PreviewRoom, type PreviewStatus } from "@/components/DoorPreview";
+import { DoorPreview, type PreviewReservation, type PreviewAnnouncement, type PreviewRoom, type PreviewStatus } from "@/components/DoorPreview";
 import { ErrorText, Field } from "@/components/Field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -269,7 +269,9 @@ function previewOf(d: Device, rooms: Room[], statuses: RoomStatusDef[], online: 
     text: a.text,
     priority: a.priority as AnnouncePriority,
   }));
-  return { room, status, announcements, online };
+  // The list the screen was sent; the preview hides the ones that already ended.
+  const reservations = ((d.desired.reservations as { items?: PreviewReservation[] } | undefined)?.items ?? []);
+  return { room, status, announcements, reservations, online };
 }
 
 const displayConfigOf = (d: Device): DisplayConfig => ({ ...DEFAULT_DISPLAY_CONFIG, ...((d.desired.displayConfig as Partial<DisplayConfig> | undefined) ?? {}) });

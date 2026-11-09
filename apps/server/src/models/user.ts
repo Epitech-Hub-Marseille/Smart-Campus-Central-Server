@@ -1,3 +1,4 @@
+import { AVAILABILITIES, SERVICES } from "@smartcampus/protocol";
 import { Schema, model, type HydratedDocument, type InferSchemaType } from "mongoose";
 
 /**
@@ -47,6 +48,17 @@ const identitySchema = new Schema(
   { _id: false },
 );
 
+/** What a person shows on the Faculty screens. `until` makes it lapse by itself (back at 14:00). */
+const availabilitySchema = new Schema(
+  {
+    status: { type: String, enum: AVAILABILITIES, default: "available", required: true },
+    note: { type: String, trim: true, default: "" },
+    until: { type: Date },
+    updatedAt: { type: Date, default: () => new Date() },
+  },
+  { _id: false },
+);
+
 const userSchema = new Schema(
   {
     // Optional: a student who only has a card has no console login. The unique index ignores missing emails.
@@ -59,6 +71,9 @@ const userSchema = new Schema(
     passwordHash: { type: String },
     identities: { type: [identitySchema], default: [] },
     department: { type: String, trim: true },
+    // Set for people who appear in the Faculty availability list. Absent: not listed.
+    service: { type: String, enum: SERVICES },
+    availability: { type: availabilitySchema },
     jobTitle: { type: String, trim: true },
     phone: { type: String, trim: true },
     disabled: { type: Boolean, default: false },

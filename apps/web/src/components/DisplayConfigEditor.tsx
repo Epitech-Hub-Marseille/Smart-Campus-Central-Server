@@ -1,6 +1,6 @@
 import { Copy, Save } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
-import { DoorPreview, type PreviewAnnouncement, type PreviewRoom, type PreviewStatus } from "@/components/DoorPreview";
+import { DoorPreview, type PreviewAnnouncement, type PreviewReservation, type PreviewRoom, type PreviewStatus } from "@/components/DoorPreview";
 import { ErrorText, Field } from "@/components/Field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,12 +25,14 @@ const ELEMENTS: { key: keyof DisplayConfig["show"]; label: string }[] = [
   { key: "capacity", label: "Capacity" },
   { key: "clock", label: "Clock" },
   { key: "announcements", label: "Announcements" },
+  { key: "nextReservation", label: "Next reservation" },
 ];
 
 interface PreviewData {
   room: PreviewRoom | null;
   status: PreviewStatus | null;
   announcements: PreviewAnnouncement[];
+  reservations?: PreviewReservation[];
   online: boolean;
 }
 
