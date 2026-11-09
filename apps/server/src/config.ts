@@ -45,6 +45,19 @@ const schema = z.object({
   // Enrollment requests per address per 15 minutes (the endpoint is public). Raise it for protocol test runs.
   ENROLL_RATE_LIMIT: z.coerce.number().int().positive().default(20),
 
+  // Text-to-speech engine (any server speaking the OpenAI `/audio/speech` API, hosted or self-hosted).
+  // Without TTS_URL the voice features answer 501 and the console hides them.
+  TTS_URL: z.string().url().optional(),
+  TTS_API_KEY: z.string().optional(),
+  TTS_MODEL: z.string().default("tts-1"),
+  // Voices the console offers, as `id|label|language` separated by commas.
+  TTS_VOICES: z.string().default("alloy|Alloy|en,nova|Nova|fr"),
+  // Voice that reads emergencies out (a serious male voice), by id from TTS_VOICES. Empty: the first voice.
+  TTS_EMERGENCY_VOICE: z.string().optional(),
+  // Pace of an emergency read-out. Slower than normal speech reads as calmer and more serious, and is easier to follow.
+  TTS_EMERGENCY_SPEED: z.coerce.number().min(0.5).max(1.5).default(0.9),
+  TTS_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+
   // Optional bootstrap admin, created on startup if it does not exist yet.
   SEED_ADMIN_EMAIL: z.string().email().optional(),
   SEED_ADMIN_PASSWORD: z.string().min(10).optional(),
