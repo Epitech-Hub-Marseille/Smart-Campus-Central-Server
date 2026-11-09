@@ -56,6 +56,13 @@ export const roomStatusValue = z.object({
   since: z.number().int().nonnegative().optional(),
 });
 
+/** Services of the staff directory shown on Faculty screens. */
+export const SERVICES = ["pedagogical", "administrative"] as const;
+export type Service = (typeof SERVICES)[number];
+
+export const AVAILABILITIES = ["available", "busy", "away", "absent"] as const;
+export type Availability = (typeof AVAILABILITIES)[number];
+
 export const DISPLAY_LAYOUTS = ["standard", "compact", "split"] as const;
 export const DISPLAY_THEMES = ["dark", "light"] as const;
 
@@ -79,11 +86,124 @@ export const displayConfig = z.object({
       capacity: z.boolean().default(true),
       clock: z.boolean().default(true),
       announcements: z.boolean().default(true),
+      nextReservation: z.boolean().default(true),
     })
     .default({}),
   sleep: timeWindow.default({}),
 });
 export type DisplayConfig = z.infer<typeof displayConfig>;
+
+export const FACULTY_SLIDES = ["news", "staff", "reservations"] as const;
+
+/**
+ * A file a device downloads over signed HTTPS (never carried in JSON), checked against `sha256` before use.
+ * `mime` tells the screen how to show it without trusting the file name.
+ */
+export const assetRef = z.object({
+  assetId: z.string().min(1).max(64),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  size: z.number().int().positive().max(200 * 1024 * 1024),
+  mime: z.string().max(60),
+});
+export type AssetRef = z.infer<typeof assetRef>;
+
+/** What a Faculty screen shows: the information board, the custom playlist, or both taking turns. */
+export const FACULTY_MODES = ["default", "custom", "mixed"] as const;
+
+/**
+ * How a Faculty screen looks. `service` filters the staff list (the server also filters what it
+ * sends, so the frame stays small). The screen fetches the weather itself from `weather`'s position.
+ */
+export const facultyConfig = z.object({
+  mode: z.enum(FACULTY_MODES).default("default"),
+  /** Who the screen belongs to: the header of the board and the details of the emergency screen. */
+  site: z
+    .object({
+      name: z.string().trim().max(80).default(""),
+      subtitle: z.string().trim().max(120).default(""),
+      /** Building or zone, shown on the emergency screen. */
+      zone: z.string().trim().max(60).default(""),
+      assemblyPoint: z.string().trim().max(80).default(""),
+      emergencyNumber: z.string().trim().max(30).default(""),
+      logo: assetRef.nullable().default(null),
+    })
+    .default({}),
+  service: z.enum(["all", ...SERVICES]).default("all"),
+  carousel: z
+    .object({
+      enabled: z.boolean().default(true),
+      intervalSeconds: z.number().int().min(5).max(120).default(15),
+      slides: z.array(z.enum(FACULTY_SLIDES)).min(1).max(FACULTY_SLIDES.length).default([...FACULTY_SLIDES]),
+    })
+    .default({}),
+  widgets: z
+    .object({
+      clock: z.boolean().default(true),
+      date: z.boolean().default(true),
+      weather: z.boolean().default(false),
+    })
+    .default({}),
+  weather: z
+    .object({
+      label: z.string().trim().max(60).default(""),
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+    })
+    .nullable()
+    .default(null),
+});
+export type FacultyConfig = z.infer<typeof facultyConfig>;
+
+/** One entry of the reservation list. Times are ms since epoch. */
+export const reservationItem = z.object({
+  id: z.string().min(1).max(64),
+  title: z.string().max(100),
+  start: z.number().int().nonnegative(),
+  end: z.number().int().nonnegative(),
+  organizer: z.string().max(60).optional(),
+});
+
+export const CONTENT_KINDS = ["image", "video", "text", "web"] as const;
+export const CONTENT_FIT = ["contain", "cover"] as const;
+
+/** Playlist bounds. Small enough that the worst case fits a frame (see the size test). */
+export const CONTENT_LIMITS = { items: 24, text: 400, title: 80, url: 300, durationMin: 3, durationMax: 600 } as const;
+
+/**
+ * One slide of the custom playlist. Which fields apply depends on `kind`: media carries an `asset`, text its
+ * `text`, a web page its `url`. `startsAt` and `endsAt` are absolute (ms), so a screen applies the schedule by
+ * itself, even offline.
+ */
+export const contentItem = z
+  .object({
+    id: z.string().min(1).max(64),
+    kind: z.enum(CONTENT_KINDS),
+    title: z.string().trim().max(CONTENT_LIMITS.title).default(""),
+    durationSeconds: z.number().int().min(CONTENT_LIMITS.durationMin).max(CONTENT_LIMITS.durationMax).default(15),
+    fit: z.enum(CONTENT_FIT).default("contain"),
+    asset: assetRef.optional(),
+    text: z.string().trim().max(CONTENT_LIMITS.text).optional(),
+    url: z.string().url().max(CONTENT_LIMITS.url).optional(),
+    /** Web pages are reloaded this often, so a live page stays live. */
+    refreshSeconds: z.number().int().min(10).max(86_400).optional(),
+    startsAt: z.number().int().nonnegative().optional(),
+    endsAt: z.number().int().nonnegative().optional(),
+  })
+  .superRefine((item, ctx) => {
+    const need = (ok: boolean, path: string, message: string) => ok || ctx.addIssue({ code: "custom", path: [path], message });
+    if (item.kind === "image" || item.kind === "video") {
+      need(Boolean(item.asset), "asset", `a ${item.kind} needs an asset`);
+      need(item.asset?.mime.startsWith(`${item.kind}/`) ?? true, "asset", `the asset is not a ${item.kind}`);
+    }
+    if (item.kind === "text") need(Boolean(item.text), "text", "a text slide needs a text");
+    if (item.kind === "web") need(Boolean(item.url) && /^https?:\/\//i.test(item.url ?? ""), "url", "a web slide needs an http(s) address");
+    if (item.startsAt !== undefined && item.endsAt !== undefined) need(item.endsAt > item.startsAt, "endsAt", "endsAt must be after startsAt");
+  });
+export type ContentItem = z.infer<typeof contentItem>;
+
+// Counts and field lengths are sized so a worst-case snapshot (multi-byte text) still fits in MAX_FRAME_BYTES once
+// encrypted and base64-encoded; the size test in protocol.test.ts proves it.
+export const FACULTY_LIMITS = { news: 8, staff: 40, reservations: 15 } as const;
 
 // ---- Server -> device ------------------------------------------------------------------
 
@@ -122,6 +242,60 @@ export const audioSettingsSet = msg(
   z.object({ volume: z.number().int().min(0).max(100), quietHours: timeWindow }),
 );
 
+/** Faculty screen look: carousel, widgets and staff service filter. */
+export const facultyConfigSet = msg("faculty.config.set", z.object({ config: facultyConfig }));
+
+/**
+ * Everything a Faculty screen rotates through, as one snapshot that replaces the previous one.
+ * Items carry their own expiry, so a screen that is offline hides stale news by itself.
+ */
+export const facultyContentSet = msg(
+  "faculty.content.set",
+  z.object({
+    news: z
+      .array(
+        z.object({
+          id: z.string().min(1).max(64),
+          title: z.string().max(120),
+          text: z.string().max(400),
+          priority: z.enum(ANNOUNCE_PRIORITIES),
+          publishedAt: z.number().int().nonnegative(),
+          expiresAt: z.number().int().optional(),
+        }),
+      )
+      .max(FACULTY_LIMITS.news),
+    staff: z
+      .array(
+        z.object({
+          id: z.string().min(1).max(64),
+          name: z.string().max(80),
+          service: z.enum(SERVICES),
+          jobTitle: z.string().max(60).optional(),
+          availability: z.enum(AVAILABILITIES),
+          note: z.string().max(60).optional(),
+          /** When the availability stops applying; afterwards the screen shows the person as available. */
+          until: z.number().int().optional(),
+        }),
+      )
+      .max(FACULTY_LIMITS.staff),
+    reservations: z.array(reservationItem.extend({ room: z.string().max(60) })).max(FACULTY_LIMITS.reservations),
+    updatedAt: z.number().int().nonnegative(),
+  }),
+);
+
+/**
+ * The custom playlist of a Faculty screen, as one snapshot that replaces the previous one. Like the Faculty
+ * content it is derived data, rebuilt on connection rather than kept in the twin. A screen switches to a new
+ * playlist only once every file in it is downloaded and verified, and keeps the old one until then.
+ */
+export const contentSet = msg("content.set", z.object({ items: z.array(contentItem).max(CONTENT_LIMITS.items), updatedAt: z.number().int().nonnegative() }));
+
+/** Upcoming reservations of the room a door screen is linked to (the screen shows the next one). */
+export const reservationsSet = msg(
+  "reservations.set",
+  z.object({ roomId: z.string().min(1).max(64), items: z.array(reservationItem).max(5) }),
+);
+
 export const announceShow = msg(
   "announce.show",
   z.object({
@@ -145,6 +319,8 @@ export const audioPlay = msg(
     assetId: z.string().min(1).max(64),
     sha256: z.string().regex(/^[0-9a-f]{64}$/),
     size: z.number().int().positive(),
+    /** Plays at full volume and ignores quiet hours. Only for emergencies. */
+    urgent: z.boolean().default(false),
   }),
 );
 
@@ -167,7 +343,18 @@ export const emergencySet = msg(
   }),
 );
 
-export const emergencyClear = msg("emergency.clear", z.object({ emergencyId: z.string().min(1).max(64) }));
+/** Bounds of how long the end-of-emergency notice stays on screen. A screen uses its own default (120 s) when none is given. */
+export const END_NOTICE_SECONDS = { min: 10, max: 900, default: 120 } as const;
+
+/** `message` is the end-of-emergency notice the screen shows for `noticeSeconds` after the alarm stops. */
+export const emergencyClear = msg(
+  "emergency.clear",
+  z.object({
+    emergencyId: z.string().min(1).max(64),
+    message: z.string().trim().min(1).max(400).optional(),
+    noticeSeconds: z.number().int().min(END_NOTICE_SECONDS.min).max(END_NOTICE_SECONDS.max).optional(),
+  }),
+);
 
 export const accessAclSync = msg(
   "access.acl.sync",
@@ -284,6 +471,10 @@ export const serverMessage = z.discriminatedUnion("type", [
   roomStatusSet,
   roomInfoSet,
   displayConfigSet,
+  facultyConfigSet,
+  facultyContentSet,
+  contentSet,
+  reservationsSet,
   audioSettingsSet,
   announceShow,
   announceClear,
@@ -308,6 +499,10 @@ export const COMMAND_TYPES = [
   "room.status.set",
   "room.info.set",
   "display.config.set",
+  "faculty.config.set",
+  "faculty.content.set",
+  "content.set",
+  "reservations.set",
   "audio.settings.set",
   "announce.show",
   "announce.clear",
