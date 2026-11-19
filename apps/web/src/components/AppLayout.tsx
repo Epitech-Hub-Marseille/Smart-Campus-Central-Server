@@ -45,7 +45,7 @@ function Rail({ sections, current, waiting }: { sections: Section[]; current: Se
             )}
           >
             <s.icon className="size-5" aria-hidden />
-            <span className="max-w-full truncate">{s.label}</span>
+            <span className="max-w-full truncate">{s.short}</span>
             {s.id === "devices" && waiting > 0 && (
               <span
                 className="absolute top-1 right-2 grid min-w-4 place-items-center rounded-full bg-primary px-1 text-[10px] leading-4 font-medium text-primary-foreground"
@@ -65,11 +65,11 @@ function Rail({ sections, current, waiting }: { sections: Section[]; current: Se
 function SectionPanel({ section }: { section: Section }) {
   if (section.items.length === 0) return null;
   return (
-    <nav aria-label={section.label} className="hidden w-56 shrink-0 flex-col border-r bg-background lg:flex">
+    <nav aria-label={section.label} className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col self-start border-r bg-background lg:flex">
       <div className="flex h-14 items-center border-b px-5 text-sm font-semibold">{section.label}</div>
       <div className="flex flex-col gap-0.5 p-3">
         <NavLink to={section.to} end className={({ isActive }) => cn(panelLink, focusRing, isActive && panelActive)}>
-          All {section.label.toLowerCase()}
+          Overview
         </NavLink>
         {section.items.map(({ to, label, icon: Icon }) => (
           <NavLink key={to} to={to} className={({ isActive }) => cn(panelLink, focusRing, isActive && panelActive)}>
