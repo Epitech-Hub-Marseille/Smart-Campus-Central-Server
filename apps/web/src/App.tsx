@@ -4,8 +4,9 @@ import { ProtectedRoute } from "@/auth/ProtectedRoute";
 import { AppLayout } from "@/components/AppLayout";
 import { EmergencyPage } from "@/pages/EmergencyPage";
 import { AvailabilityPage } from "@/pages/AvailabilityPage";
-import { ContentPage } from "@/pages/ContentPage";
-import { FacultyPage } from "@/pages/FacultyPage";
+import { MediaPage } from "@/pages/MediaPage";
+import { NewsPage } from "@/pages/NewsPage";
+import { ScreensPage } from "@/pages/ScreensPage";
 import { ReservationsPage } from "@/pages/ReservationsPage";
 import { SectionPage } from "@/pages/SectionPage";
 import { SchedulesPage } from "@/pages/SchedulesPage";
@@ -50,8 +51,9 @@ export default function App() {
                 <Route path="/intercom" element={<IntercomPage />} />
                 <Route path="/schedules" element={<SchedulesPage />} />
                 <Route path="/templates" element={<TemplatesPage />} />
-                <Route path="/content" element={<ContentPage />} />
-                <Route path="/faculty" element={<FacultyPage />} />
+                <Route path="/media" element={<MediaPage />} />
+                <Route path="/screens" element={<ScreensPage />} />
+                <Route path="/news" element={<NewsPage />} />
                 <Route path="/statuses" element={<StatusesPage />} />
                 <Route path="/staff" element={<StaffPage />} />
                 <Route path="/students" element={<StudentsPage />} />

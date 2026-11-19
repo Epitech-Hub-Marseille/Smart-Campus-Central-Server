@@ -219,9 +219,15 @@ export interface Asset {
   mime: string;
   size: number;
   sha256: string;
+  /** One level of folders in the media library ("" is the root). */
+  folder: string;
   createdBy: string;
   createdAt: string;
+  updatedAt: string;
 }
+
+/** Image of a library file; `sha256` in the address makes the browser fetch it again after a replacement. */
+export const assetUrl = (a: Pick<Asset, "id" | "sha256">) => `/api/assets/${a.id}/file?v=${a.sha256.slice(0, 8)}`;
 
 export interface TimeWindow {
   enabled: boolean;
@@ -408,51 +414,6 @@ export interface StaffAvailability {
   updatedAt: string | null;
 }
 
-export const FACULTY_SLIDES = ["news", "staff", "reservations"] as const;
-export type FacultySlide = (typeof FACULTY_SLIDES)[number];
-export const SLIDE_LABEL: Record<FacultySlide, string> = { news: "News", staff: "Staff availability", reservations: "Room reservations" };
-
-/** What a Faculty screen shows: the information board, the custom content, or both taking turns. */
-export const FACULTY_MODES = ["default", "custom", "mixed"] as const;
-export type FacultyMode = (typeof FACULTY_MODES)[number];
-export const MODE_LABEL: Record<FacultyMode, string> = {
-  default: "Information board",
-  custom: "Custom content only",
-  mixed: "Both, taking turns",
-};
-
-export interface AssetRef {
-  assetId: string;
-  sha256: string;
-  size: number;
-  mime: string;
-}
-
-export interface FacultySite {
-  name: string;
-  subtitle: string;
-  zone: string;
-  assemblyPoint: string;
-  emergencyNumber: string;
-  logo: AssetRef | null;
-}
-
-export interface FacultyConfig {
-  mode: FacultyMode;
-  site: FacultySite;
-  service: "all" | Service;
-  carousel: { enabled: boolean; intervalSeconds: number; slides: FacultySlide[] };
-  widgets: { clock: boolean; date: boolean; weather: boolean };
-  weather: { label: string; latitude: number; longitude: number } | null;
-}
-
-export interface FacultyDisplay {
-  id: string;
-  name: string;
-  online: boolean;
-  config: FacultyConfig;
-}
-
 export interface Reservation {
   id: string;
   roomId: string;
@@ -468,27 +429,126 @@ export interface Reservation {
 /** Value for an `<input type="datetime-local">` (local time, no zone) from a date. */
 export const toLocalInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 
-// ---- Custom content ------------------------------------------------------------------------------
+// ---- Faculty screens: groups, levels, scenes ------------------------------------------------------
 
-export const CONTENT_KINDS = ["image", "video", "text", "web"] as const;
-export type ContentKind = (typeof CONTENT_KINDS)[number];
-export const CONTENT_KIND_LABEL: Record<ContentKind, string> = { image: "Image", video: "Video", text: "Text", web: "Web page" };
+export interface AssetPointer {
+  assetId: string;
+}
 
-export interface ContentSlide {
+/** What a level of the hierarchy sets. A missing field is inherited from the level above. */
+export interface FacultyConfigPatch {
+  site?: { name?: string; subtitle?: string; zone?: string; assemblyPoint?: string; emergencyNumber?: string; logo?: AssetPointer | null };
+  service?: "all" | Service;
+  carousel?: { enabled?: boolean };
+  widgets?: { clock?: boolean; date?: boolean; weather?: boolean };
+  weather?: { label: string; latitude: number; longitude: number } | null;
+}
+
+export interface FacultyDefaults {
+  site: { name: string; subtitle: string; zone: string; assemblyPoint: string; emergencyNumber: string; logo: null };
+  service: "all" | Service;
+  carousel: { enabled: boolean };
+  widgets: { clock: boolean; date: boolean; weather: boolean };
+  weather: null;
+}
+
+export type FieldType = "text" | "longtext" | "url" | "number" | "boolean" | "select" | "asset";
+
+export interface FieldDef {
+  key: string;
+  label: string;
+  type: FieldType;
+  required?: boolean;
+  help?: string;
+  max?: number;
+  min?: number;
+  options?: { value: string; label: string }[];
+  accept?: "image" | "video";
+  default?: string | number | boolean;
+}
+
+export interface TileKindDef {
+  kind: string;
+  label: string;
+  description: string;
+  group: "board" | "media" | "live";
+  audible: boolean;
+  fields: FieldDef[];
+}
+
+export interface LayoutDef {
+  label: string;
+  columns: string;
+  rows: string;
+  /** Grid lines per tile: [row start, column start, row end, column end]. */
+  tiles: [number, number, number, number][];
+}
+
+export interface TileKinds {
+  kinds: TileKindDef[];
+  layouts: Record<string, LayoutDef>;
+  limits: { scenes: number; tiles: number };
+  defaults: FacultyDefaults;
+}
+
+export interface Tile {
   id: string;
-  kind: ContentKind;
-  title: string;
-  text: string | null;
-  url: string | null;
-  refreshSeconds: number | null;
-  assetId: string | null;
+  kind: string;
+  settings: Record<string, unknown>;
+}
+
+export interface Scene {
+  id: string;
+  name: string;
+  layout: string;
   durationSeconds: number;
-  fit: "contain" | "cover";
-  startsAt: string | null;
-  endsAt: string | null;
-  targets: Targets;
   enabled: boolean;
-  state: "live" | "scheduled" | "over" | "paused";
-  displayCount: number;
-  createdBy: string;
+  startsAt?: number;
+  endsAt?: number;
+  tiles: Tile[];
+}
+
+export type ScopeKind = "default" | "group" | "device";
+
+export interface ScreenGroup {
+  id: string;
+  name: string;
+  description: string;
+  members: string[];
+  own: { config: boolean; playlist: boolean };
+}
+
+export interface ScreenSummary {
+  id: string;
+  name: string;
+  online: boolean;
+  groupId: string | null;
+  own: { config: boolean; playlist: boolean };
+}
+
+export interface ScreensOverview {
+  default: { config: boolean; playlist: boolean };
+  groups: ScreenGroup[];
+  displays: ScreenSummary[];
+}
+
+export type PlaylistSource = "device" | "group" | "default" | "builtin";
+
+/** One level, with what it sets and what it inherits from above. */
+export interface ScopeView {
+  scope: ScopeKind;
+  key: string;
+  name: string;
+  screens: number | null;
+  group: { id: string; name: string } | null;
+  config: FacultyConfigPatch;
+  scenes: Scene[] | null;
+  inherited: { config: FacultyConfigPatch; scenes: { from: PlaylistSource; items: Scene[] } };
+}
+
+export interface AssetUse {
+  scope: ScopeKind;
+  key: string;
+  name: string;
+  as: "logo" | "tile";
 }

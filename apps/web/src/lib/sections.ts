@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   Megaphone,
   MonitorPlay,
+  Newspaper,
   Radio,
   Settings2,
   Siren,
@@ -31,6 +32,8 @@ export interface SectionItem {
 export interface Section {
   id: string;
   label: string;
+  /** What fits under an icon in the rail. */
+  short: string;
   icon: LucideIcon;
   /** Where the rail icon leads: the hub page of the section. */
   to: string;
@@ -47,6 +50,7 @@ export interface Section {
 const OVERVIEW: Section = {
     id: "overview",
     label: "Overview",
+    short: "Overview",
     icon: LayoutDashboard,
     to: "/",
     managerOnly: false,
@@ -59,6 +63,7 @@ export const SECTIONS: Section[] = [
   {
     id: "campus",
     label: "Campus",
+    short: "Campus",
     icon: Building2,
     to: "/section/campus",
     managerOnly: false,
@@ -73,20 +78,23 @@ export const SECTIONS: Section[] = [
   {
     id: "devices",
     label: "Devices",
+    short: "Devices",
     icon: Radio,
     to: "/section/devices",
     managerOnly: true,
     summary: "Door units, Faculty screens and what they show.",
     items: [
       { to: "/devices", label: "Devices", icon: Radio, description: "Approve connection requests, monitor and configure devices." },
-      { to: "/faculty", label: "Faculty screens", icon: MonitorPlay, description: "News, carousel and widgets of the information screens." },
-      { to: "/content", label: "Custom content", icon: Images, description: "Image and video library, slides and playlists." },
+      { to: "/screens", label: "Faculty screens", icon: MonitorPlay, description: "Group screens, set their look and choose what they rotate through." },
+      { to: "/media", label: "Media library", icon: Images, description: "Images and videos: upload, rename, replace and delete." },
+      { to: "/news", label: "News", icon: Newspaper, description: "Campus news shown on the Faculty screens." },
       { to: "/statuses", label: "Room statuses", icon: Tags, description: "The catalogue of statuses a door can show." },
     ],
   },
   {
     id: "communication",
     label: "Communication",
+    short: "Comms",
     icon: Megaphone,
     to: "/section/communication",
     managerOnly: true,
@@ -102,6 +110,7 @@ export const SECTIONS: Section[] = [
   {
     id: "administration",
     label: "Administration",
+    short: "Admin",
     icon: Settings2,
     to: "/section/administration",
     managerOnly: true,
