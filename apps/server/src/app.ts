@@ -9,6 +9,7 @@ import { config, isProd } from "./config.js";
 import { HttpError } from "./lib/errors.js";
 import { announcementTemplatesRouter } from "./routes/announcementTemplates.js";
 import { announcementsRouter } from "./routes/announcements.js";
+import { apiKeysRouter } from "./routes/apiKeys.js";
 import { assetsRouter } from "./routes/assets.js";
 import { authRouter } from "./routes/auth.js";
 import { cardRegistrationRouter } from "./routes/cardRegistration.js";
@@ -73,6 +74,7 @@ export function createApp(options: { serverPublicKey?: string } = {}) {
   api.use("/intercom", intercomRouter);
   api.use("/rooms", roomsRouter);
   api.use("/room-statuses", roomStatusesRouter);
+  api.use("/api-keys", apiKeysRouter);
   api.use("/users", usersRouter);
   api.use("/students", studentsRouter);
   api.use("/card-registration", cardRegistrationRouter);
