@@ -2,6 +2,7 @@ import { z } from "zod";
 import { PROTOCOL_VERSION } from "./constants.js";
 import { EMERGENCY_KINDS } from "./emergency.js";
 import { assetRef, wireScene, TILE_LIMITS } from "./screens.js";
+import { themeSpec } from "./theme.js";
 import { ULID_REGEX } from "./ulid.js";
 
 /** Envelope shared by every message after the handshake. */
@@ -181,6 +182,12 @@ export const audioSettingsSet = msg(
   "audio.settings.set",
   z.object({ volume: z.number().int().min(0).max(100), quietHours: timeWindow }),
 );
+
+/**
+ * The visual theme of a door unit or a Faculty screen, or `null` to go back to the app's own look. Part of the desired
+ * state. See theme.ts for what a theme may and may not contain.
+ */
+export const themeSet = msg("theme.set", z.object({ theme: themeSpec.nullable() }));
 
 /** Faculty screen look: carousel, widgets and staff service filter. */
 export const facultyConfigSet = msg("faculty.config.set", z.object({ config: facultyConfig }));
@@ -421,6 +428,7 @@ export const serverMessage = z.discriminatedUnion("type", [
   roomStatusSet,
   roomInfoSet,
   displayConfigSet,
+  themeSet,
   facultyConfigSet,
   facultyContentSet,
   carouselSet,
@@ -449,6 +457,7 @@ export const COMMAND_TYPES = [
   "room.status.set",
   "room.info.set",
   "display.config.set",
+  "theme.set",
   "faculty.config.set",
   "faculty.content.set",
   "carousel.set",

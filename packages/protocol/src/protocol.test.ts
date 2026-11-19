@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FACULTY_LIMITS, SCENE_LAYOUTS, TILE_KINDS, TILE_LIMITS, facultyConfig, facultyConfigPatch, mergeConfigPatches, parseYoutubeId, patchHas, sceneInput, EMERGENCY_CATALOGUE, EMERGENCY_KINDS, MAX_FRAME_BYTES, buildMessage, displayConfig, handshakeMessages, isUlid, parseDeviceMessage, parseServerMessage, ulid } from "./index.js";
+import { THEME_LIMITS, cssProblems, themeInput, themeSpec, FACULTY_LIMITS, SCENE_LAYOUTS, TILE_KINDS, TILE_LIMITS, facultyConfig, facultyConfigPatch, mergeConfigPatches, parseYoutubeId, patchHas, sceneInput, EMERGENCY_CATALOGUE, EMERGENCY_KINDS, MAX_FRAME_BYTES, buildMessage, displayConfig, handshakeMessages, isUlid, parseDeviceMessage, parseServerMessage, ulid } from "./index.js";
 
 describe("ulid", () => {
   it("is 26 Crockford chars and sortable by time", () => {
@@ -317,5 +317,68 @@ describe("screens: scenes, tiles and layered config", () => {
     expect(facultyConfigPatch.safeParse({ site: { logo: { assetId: "x", sha256: "y" } } }).success).toBe(true);
     expect(facultyConfigPatch.parse({ site: { logo: { assetId: "x", sha256: "y" } } }).site?.logo).toEqual({ assetId: "x" });
     expect(facultyConfigPatch.safeParse({ weather: { latitude: 95, longitude: 0, label: "" } }).success).toBe(false);
+  });
+});
+
+describe("themes", () => {
+  const spec = (extra: object = {}) => ({ id: "t1", name: "Night", version: 1, tokens: { mode: "dark", colors: { background: "#101828", primary: "#4f8cff" }, typography: { fontFamily: "sans", scale: 1.1 }, shape: { radius: 12 } }, ...extra });
+  const send = (theme: unknown) => parseServerMessage(JSON.stringify(buildMessage({ type: "theme.set", payload: { theme } } as never, 1)));
+
+  it("is a command, and null takes a device back to its own look", () => {
+    expect(send(spec()).ok).toBe(true);
+    expect(send(null).ok).toBe(true);
+    expect(send({ ...spec(), version: 0 }).ok).toBe(false);
+  });
+
+  it("takes any of the colours, only as six-digit hex, and nothing that is not a token", () => {
+    expect(themeSpec.safeParse(spec({ tokens: { colors: { text: "#fff" } } })).success).toBe(false);
+    expect(themeSpec.safeParse(spec({ tokens: { colors: { text: "red" } } })).success).toBe(false);
+    expect(themeSpec.safeParse(spec({ tokens: { colors: { sparkle: "#ffffff" } } })).success).toBe(false);
+    expect(themeSpec.safeParse(spec({ tokens: { surprise: true } })).success).toBe(false);
+    expect(themeSpec.safeParse(spec({ tokens: { colors: { text: "#FFFFFF" } } })).success).toBe(true);
+  });
+
+  it("keeps the text scale, the radius and the font to sensible bounds", () => {
+    const tokens = (t: object) => spec({ tokens: t });
+    expect(themeSpec.safeParse(tokens({ typography: { scale: 0.5 } })).success).toBe(false);
+    expect(themeSpec.safeParse(tokens({ typography: { scale: 3 } })).success).toBe(false);
+    expect(themeSpec.safeParse(tokens({ typography: { fontFamily: "Comic Sans" } })).success).toBe(false);
+    expect(themeSpec.safeParse(tokens({ shape: { radius: THEME_LIMITS.radiusMax + 1 } })).success).toBe(false);
+    expect(themeSpec.safeParse(tokens({ shape: { radius: 1.5 } })).success).toBe(false);
+    expect(themeSpec.parse({ id: "x", name: "Empty", version: 1 }).tokens).toEqual({ colors: {}, typography: {}, shape: {} });
+  });
+
+  it("accepts ordinary CSS and refuses what could load or run something", () => {
+    expect(cssProblems(".card > h2 { color: #123456; border-radius: 4px } /* note */ @media (min-width: 40rem) { .x { gap: 1rem } }")).toEqual([]);
+    for (const bad of [
+      "@import 'https://evil.example/x.css';",
+      "body { background: url(https://evil.example/x.png) }",
+      "body { background: /* hidden */ url(x) }",
+      "body { background: u\\72l(x) }",
+      "a { width: expression(alert(1)) }",
+      "a { background: javascript:alert(1) }",
+      "a { -moz-binding: x }",
+      "a { color: red } </style><script>alert(1)</script>",
+      "@font-face { font-family: x }",
+      "a { content: '\\75rl' }",
+      ".a { color: red",
+      "}",
+    ]) {
+      expect(cssProblems(bad).length, bad).toBeGreaterThan(0);
+    }
+    expect(cssProblems("a{}".repeat(THEME_LIMITS.css)).length).toBeGreaterThan(0);
+  });
+
+  it("applies the CSS rules to what a device receives as well as to what the console sends", () => {
+    expect(send(spec({ css: "a { color: red }" })).ok).toBe(true);
+    expect(send(spec({ css: "a { background: url(x) }" })).ok).toBe(false);
+    expect(themeInput.safeParse({ name: "x", css: "@import 'x'" }).success).toBe(false);
+    expect(themeInput.safeParse({ name: "x", tokens: {}, css: "", extra: 1 }).success).toBe(false);
+  });
+
+  it("a theme at its limits still fits a frame", () => {
+    const frame = JSON.stringify(buildMessage({ type: "theme.set", payload: { theme: spec({ name: "é".repeat(THEME_LIMITS.name), css: "a{color:red}".repeat(THEME_LIMITS.css / 12) }) } } as never, 1));
+    expect(parseServerMessage(frame).ok).toBe(true);
+    expect(Buffer.byteLength(frame) + 512).toBeLessThan(MAX_FRAME_BYTES);
   });
 });
