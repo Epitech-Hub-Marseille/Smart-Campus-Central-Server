@@ -7,6 +7,7 @@ import { AvailabilityPage } from "@/pages/AvailabilityPage";
 import { ContentPage } from "@/pages/ContentPage";
 import { FacultyPage } from "@/pages/FacultyPage";
 import { ReservationsPage } from "@/pages/ReservationsPage";
+import { SectionPage } from "@/pages/SectionPage";
 import { SchedulesPage } from "@/pages/SchedulesPage";
 import { TemplatesPage } from "@/pages/TemplatesPage";
 import { AnnouncementsPage } from "@/pages/AnnouncementsPage";
@@ -36,6 +37,7 @@ export default function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route path="/" element={<DashboardPage />} />
+              <Route path="/section/:id" element={<SectionPage />} />
               <Route path="/rooms" element={<RoomsPage />} />
               <Route path="/buildings" element={<BuildingsPage />} />
               <Route path="/reservations" element={<ReservationsPage />} />
