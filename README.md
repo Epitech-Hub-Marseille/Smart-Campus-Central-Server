@@ -43,6 +43,7 @@ The single `pnpm-lock.yaml` at the root is committed.
 | Room status | Free, occupied, closed and works built in, plus custom statuses (label, colour, icon). Changing a status is stored with its history, pushed to the door screens of the room and audited |
 | Announcements | Text announcements on door and faculty screens, targeted by device, group, building, floor or everyone, with priority (info, important, urgent) and an expiry the screen enforces by itself |
 | Two-factor authentication | Authenticator-app codes (TOTP, RFC 6238). Administrators must set it up before the console lets them do anything else; everyone else may. Ten single-use recovery codes, a lockout after five wrong codes, and a reset by another administrator. Every emergency alert, test or real, asks for a fresh code. |
+| API keys | Keys for other applications to use the official API, each with only the scopes it needs, a required end date (at most one year), instant revocation and a usage log. Created by administrators with a fresh authenticator code, shown once, stored hashed. |
 | Emergency alerts | Fire, biohazard, radiation leak, bomb threat, earthquake and power cut. Takes over the door screens (door code, chevrons towards the emblem, procedure) and loops a synthesised alarm until ended. Test mode shows a TEST tag and plays at a chosen volume. Kept in the digital twin, so an offline screen sounds the alarm when it reconnects and stops if the alert ended meanwhile. A real alert needs two steps enforced by the API, can also be read aloud, and ends with a message shown on the screens (see [Emergency alerts](#emergency-alerts)) |
 | InterCom | Record or import a sound (stored in GridFS, WAV/MP3/Ogg/WebM/M4A, `MAX_AUDIO_MB`), broadcast it to chosen devices. Devices download it over a request signed with their key. Volume and quiet hours per device. **Voice announcements**: type a text, choose a language and a voice, listen to it, then broadcast it (see [Voice and schedules](#voice-announcements-schedules-and-templates)) |
 | Schedules and templates | Announcements that send themselves once, daily, weekly, or when a room changes status; a library of reusable announcement texts |
@@ -249,3 +250,18 @@ cannot weaken it.
   (`two_factor_setup_required`). These answer 403, not 401, so the console does not read a typo as an expired session. Ending an alert needs
   no code: taking an alarm off the screens is never slowed down. Recovery codes do not work here, only the phone.
 - Not covered: Microsoft SSO sign-in (the identity provider's own multi-factor applies) and API keys (a separate feature).
+
+## API keys
+
+Other applications use the same API as the console, with `Authorization: Bearer scak_<id>_<secret>`. Keys are managed by administrators in the console
+(Administration, API keys) or at `/api/api-keys`, from a signed-in session only: **a key can never create, list or revoke keys**.
+
+- **Scopes, deny by default.** A key may do exactly what its scopes say, on exactly the endpoints listed in `apps/server/src/auth/apiKeyScopes.ts`
+  (`GET /api/api-keys/scopes` lists them for the console). An endpoint that is not in that list is closed to every key, so a new endpoint is closed
+  to keys until someone decides which scope it belongs to. Never listed: accounts and sign-in, keys, device enrollment and commands, assets,
+  InterCom, Faculty screen settings, and emergency alerts (a machine cannot hold the second factor they need).
+- **Creating one** needs a fresh authenticator code. The key is in the answer once; only the SHA-256 of its 256-bit secret is stored. It expires
+  after 30 days to 1 year (default 90), never later; revoking takes effect on the next call.
+- **Every call is logged** (method, path without its query string, status, address), refused ones included, for 90 days, and shown in the console.
+  A key is limited to 300 calls a minute. Changes made with a key appear in the audit log as `API key: <name>`.
+- A request with a key that is wrong, expired or revoked always gets the same `401 invalid_api_key`; a key never falls back to a cookie.
