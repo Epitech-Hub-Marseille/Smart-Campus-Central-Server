@@ -6,8 +6,8 @@ import { assetRef } from "./screens.js";
  *
  * A theme is **tokens** (JSON) that every app understands, and optionally **CSS** that only the web-based Faculty screens
  * apply. The tokens are a small, closed set (colours, a font family from a fixed list, a text scale, a corner radius), so a
- * theme can never be bigger than a frame, and a device that does not know a token ignores it. What a theme cannot touch:
- * emergency alerts, which always look the same.
+ * theme can never be bigger than a frame, and a device that does not know a token ignores it. Emergency alerts keep their colour,
+ * wording and alarm; a theme only reaches them through the small `emergency` section below.
  */
 export const THEME_LIMITS = { css: 12_000, name: 60, scaleMin: 0.8, scaleMax: 1.4, radiusMax: 32, fontBytes: 2 * 1024 * 1024 } as const;
 
@@ -81,6 +81,42 @@ export function cssProblems(css: string): string[] {
   return problems;
 }
 
+/**
+ * How an emergency alert may be dressed. Emergencies stay recognisable and readable whatever the theme says, so this is a
+ * small, closed set and not CSS: the wording of the alert, its alarm and its white and yellow text are never themed. Its
+ * background is the dark colour of its kind unless the theme gives another. A theme can give the alert its fonts, a frame,
+ * rounder corners, and dark backgrounds for the page and the panel behind the numbered steps. A background must keep white text readable (contrast of at least EMERGENCY_MIN_CONTRAST).
+ * A device that cannot apply any of it, or that finds it invalid, shows the default alert.
+ */
+export const EMERGENCY_FRAMES = ["stripes", "bar"] as const;
+export type EmergencyFrame = (typeof EMERGENCY_FRAMES)[number];
+
+/** WCAG's threshold for large text. The alert's text is large and white. */
+export const EMERGENCY_MIN_CONTRAST = 4.5;
+
+/** Contrast ratio of white text on a "#rrggbb" background (WCAG relative luminance). */
+export function contrastOnWhite(color: string): number {
+  const [red, green, blue] = [1, 3, 5].map((i) => {
+    const channel = parseInt(color.slice(i, i + 2), 16) / 255;
+    return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  return 1.05 / (0.2126 * red + 0.7152 * green + 0.0722 * blue + 0.05);
+}
+
+const darkEnough = hex.refine((color) => contrastOnWhite(color) >= EMERGENCY_MIN_CONTRAST, `dark enough for white text (contrast ${EMERGENCY_MIN_CONTRAST}:1)`);
+
+export const emergencyTheme = z
+  .object({
+    /** Use the theme's font files (body, heading, mono) on the alert. */
+    fonts: z.boolean().default(false),
+    /** "stripes": yellow and black hazard stripes (the default look). "bar": a plain solid yellow band. */
+    frame: z.enum(EMERGENCY_FRAMES).default("stripes"),
+    radius: z.number().int().min(0).max(THEME_LIMITS.radiusMax).optional(),
+    colors: z.object({ background: darkEnough.optional(), card: darkEnough.optional() }).strict().default({}),
+  })
+  .strict();
+export type EmergencyTheme = z.infer<typeof emergencyTheme>;
+
 /** What a device receives: one resolved theme. `version` rises with every edit, so a device can tell it has the latest. */
 export const themeSpec = z
   .object({
@@ -90,6 +126,8 @@ export const themeSpec = z
     tokens: themeTokens.default({}),
     /** Font files to download (id, hash, size), as for any other asset. Without one, the app falls back to `fontFamily`. */
     fonts: slotRecord(assetRef).default({}),
+    /** For the alerts. A device that finds it invalid ignores this part and keeps the rest of the theme: the default alert. */
+    emergency: emergencyTheme.optional().catch(undefined),
     /** For the Faculty screens only. The door app ignores it. */
     css: z.string().max(THEME_LIMITS.css).optional(),
   })
@@ -105,6 +143,7 @@ export const themeInput = z
     description: z.string().trim().max(200).default(""),
     tokens: themeTokens.default({}),
     fonts: slotRecord(fontChoice).default({}),
+    emergency: emergencyTheme.default({}),
     css: z.string().max(THEME_LIMITS.css).default(""),
   })
   .strict()

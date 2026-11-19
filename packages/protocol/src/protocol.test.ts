@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { THEME_LIMITS, cssProblems, themeInput, themeSpec, FACULTY_LIMITS, SCENE_LAYOUTS, TILE_KINDS, TILE_LIMITS, facultyConfig, facultyConfigPatch, mergeConfigPatches, parseYoutubeId, patchHas, sceneInput, EMERGENCY_CATALOGUE, EMERGENCY_KINDS, MAX_FRAME_BYTES, buildMessage, displayConfig, handshakeMessages, isUlid, parseDeviceMessage, parseServerMessage, ulid } from "./index.js";
+import { EMERGENCY_MIN_CONTRAST, contrastOnWhite, THEME_LIMITS, cssProblems, themeInput, themeSpec, FACULTY_LIMITS, SCENE_LAYOUTS, TILE_KINDS, TILE_LIMITS, facultyConfig, facultyConfigPatch, mergeConfigPatches, parseYoutubeId, patchHas, sceneInput, EMERGENCY_CATALOGUE, EMERGENCY_KINDS, MAX_FRAME_BYTES, buildMessage, displayConfig, handshakeMessages, isUlid, parseDeviceMessage, parseServerMessage, ulid } from "./index.js";
 
 describe("ulid", () => {
   it("is 26 Crockford chars and sortable by time", () => {
@@ -332,6 +332,30 @@ describe("themes", () => {
     expect(send(spec({ fonts: { body: { ...ref, sha256: "nope" } } })).ok).toBe(false);
     expect(themeInput.safeParse({ name: "Brand", fonts: { body: "01J" } }).success).toBe(true);
     expect(themeInput.safeParse({ name: "Brand", fonts: { body: "" } }).success).toBe(false);
+  });
+
+  it("dresses an alert with a small set, and a background must keep white text readable", () => {
+    const dressed = { fonts: true, frame: "bar", radius: 2, colors: { background: "#001070", card: "#0a1a8a" } };
+    expect(themeInput.safeParse({ name: "T", emergency: dressed }).success).toBe(true);
+    expect(themeInput.safeParse({ name: "T" }).success).toBe(true);
+    const refused = (emergency: object) => themeInput.safeParse({ name: "T", emergency }).success;
+    expect(refused({ colors: { background: "#ffffff" } })).toBe(false);
+    expect(refused({ colors: { card: "#f3f3f1" } })).toBe(false);
+    expect(refused({ colors: { accent: "#000000" } })).toBe(false);
+    expect(refused({ frame: "disco" })).toBe(false);
+    expect(refused({ css: "a{}" })).toBe(false);
+    expect(contrastOnWhite("#000000")).toBeCloseTo(21, 0);
+    expect(contrastOnWhite("#ffffff")).toBeCloseTo(1.05 / 1.05, 5);
+    expect(contrastOnWhite("#0038ff")).toBeLessThan(EMERGENCY_MIN_CONTRAST + 3);
+  });
+
+  it("a device keeps the rest of the theme when the alert part is invalid, and the alert then looks as usual", () => {
+    const dressed = send(spec({ emergency: { frame: "bar", colors: { background: "#001070" } } }));
+    expect(dressed.ok && (dressed.message.payload as any).theme.emergency).toMatchObject({ frame: "bar", fonts: false });
+    const broken = send(spec({ emergency: { colors: { background: "#ffffff" } } }));
+    expect(broken.ok).toBe(true);
+    expect(broken.ok && (broken.message.payload as any).theme).toMatchObject({ id: "t1" });
+    expect(broken.ok && (broken.message.payload as any).theme.emergency).toBeUndefined();
   });
 
   it("is a command, and null takes a device back to its own look", () => {
