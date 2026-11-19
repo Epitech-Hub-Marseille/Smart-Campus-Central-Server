@@ -37,7 +37,6 @@
     "vitest": "^3.2.0"
   },
   "files": [
-    "dist",
-    "assets"
+    "dist"
   ]
 }
