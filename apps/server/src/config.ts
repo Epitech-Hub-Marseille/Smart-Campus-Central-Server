@@ -40,12 +40,55 @@ const schema = z.object({
   MAX_PENDING_ENROLLMENTS: z.coerce.number().int().positive().default(50),
   // Largest audio upload (megabytes). Audio is stored in GridFS and downloaded by devices over signed HTTPS.
   MAX_AUDIO_MB: z.coerce.number().positive().max(100).default(10),
+  // Largest image or video upload for the content library (megabytes). Videos are the reason it is larger than MAX_AUDIO_MB.
+  MAX_MEDIA_MB: z.coerce.number().positive().max(500).default(50),
   // New device connections per address per minute (handshake rate limit). Raise it for protocol test runs.
   GATEWAY_CONNECTS_PER_MINUTE: z.coerce.number().int().positive().default(30),
   // Enrollment requests per address per 15 minutes (the endpoint is public). Raise it for protocol test runs.
   ENROLL_RATE_LIMIT: z.coerce.number().int().positive().default(20),
   /** Per minute and per address: a waiting device checks every few seconds, and several screens may share an address. */
   ENROLL_STATUS_RATE_LIMIT: z.coerce.number().int().positive().default(120),
+
+  // Password sign-in attempts per address per 15 minutes (the second-factor step allows twice as many).
+  LOGIN_RATE_LIMIT: z.coerce.number().int().positive().default(10),
+
+  // Two-factor authentication. The key encrypts the authenticator secrets at rest (32 random bytes, base64); it is a mounted
+  // secret and required in production. Admins must have two-factor before they can use the console unless this is turned off.
+  TWO_FACTOR_KEY: z
+    .string()
+    .optional()
+    .refine((k) => !k || Buffer.from(k, "base64").length === 32, "TWO_FACTOR_KEY must be 32 bytes, base64 encoded"),
+  TWO_FACTOR_ISSUER: z.string().trim().min(1).max(40).default("Smart Campus"),
+  REQUIRE_ADMIN_2FA: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+
+  // Time zone of the campus: schedules ("every day at 08:00") and the reservations day are read in it.
+  CAMPUS_TIMEZONE: z
+    .string()
+    .default("Europe/Paris")
+    .refine((tz) => {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: tz });
+        return true;
+      } catch {
+        return false;
+      }
+    }, "unknown time zone"),
+
+  // Text-to-speech engine (any server speaking the OpenAI `/audio/speech` API, hosted or self-hosted).
+  // Without TTS_URL the voice features answer 501 and the console hides them.
+  TTS_URL: z.string().url().optional(),
+  TTS_API_KEY: z.string().optional(),
+  TTS_MODEL: z.string().default("tts-1"),
+  // Voices the console offers, as `id|label|language` separated by commas.
+  TTS_VOICES: z.string().default("alloy|Alloy|en,nova|Nova|fr"),
+  // Voice that reads emergencies out (a serious male voice), by id from TTS_VOICES. Empty: the first voice.
+  TTS_EMERGENCY_VOICE: z.string().optional(),
+  // Pace of an emergency read-out. Slower than normal speech reads as calmer and more serious, and is easier to follow.
+  TTS_EMERGENCY_SPEED: z.coerce.number().min(0.5).max(1.5).default(0.9),
+  TTS_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 
   // Optional bootstrap admin, created on startup if it does not exist yet.
   SEED_ADMIN_EMAIL: z.string().email().optional(),
@@ -77,6 +120,7 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !
 
 export const config = schema.parse(env);
 export const isProd = config.NODE_ENV === "production";
+if (isProd && !config.TWO_FACTOR_KEY) throw new Error("TWO_FACTOR_KEY is required in production: it encrypts the authenticator secrets (32 random bytes, base64)");
 
 /** Origins the console is served from: APP_URL plus ALLOWED_ORIGINS, compared as `scheme://host:port`. */
 const consoleOrigins = new Set([config.APP_URL, ...config.ALLOWED_ORIGINS].map((url) => new URL(url).origin));

@@ -7,10 +7,12 @@ export interface UserLike {
   groups: Group[];
   cardUid?: string | null;
   department?: string | null;
+  service?: string | null;
   jobTitle?: string | null;
   phone?: string | null;
   disabled: boolean;
   passwordHash?: string | null;
+  twoFactor?: { enabled?: boolean | null } | null;
   createdAt?: Date;
 }
 
@@ -23,9 +25,11 @@ export const userDto = (u: UserLike | UserDoc) => ({
   role: roleOf(u.groups as Group[]),
   cardUid: u.cardUid ?? null,
   department: u.department ?? "",
+  service: u.service ?? null,
   jobTitle: u.jobTitle ?? "",
   phone: u.phone ?? "",
   disabled: u.disabled,
   hasPassword: Boolean(u.passwordHash),
+  twoFactor: Boolean(u.twoFactor?.enabled),
   createdAt: u.createdAt,
 });

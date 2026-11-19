@@ -3,30 +3,30 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Palette: near-black gray surfaces, #00a86b as the foreground/accent. Dark only. Layout follows UniFi Site Manager: flat surfaces, hairline borders, a left rail. */
+/* Palette: soft cool-gray surfaces with near-neutral text. Green (#0a7f58) is only an accent: primary actions, the active item, focus rings. Layout follows UniFi Site Manager: flat surfaces, hairline borders, a left rail. */
 :root {
-  color-scheme: dark;
+  color-scheme: light;
   --radius: 0.625rem;
 
-  --background: #0e0f10;
-  --foreground: #00a86b;
-  --card: #151718;
-  --card-foreground: #00a86b;
-  --popover: #151718;
-  --popover-foreground: #00a86b;
-  --primary: #00a86b;
-  --primary-foreground: #06120d;
-  --secondary: #1d2022;
-  --secondary-foreground: #00a86b;
-  --muted: #1d2022;
-  --muted-foreground: #5f8f7b;
-  --accent: #1a2a23;
-  --accent-foreground: #00a86b;
-  --destructive: #e5484d;
-  --border: #212527;
-  --input: #2c3033;
-  --ring: #00a86b;
-  --sidebar: #0b0c0d;
+  --background: #f1f3f5;
+  --foreground: #1d2429;
+  --card: #ffffff;
+  --card-foreground: #1d2429;
+  --popover: #ffffff;
+  --popover-foreground: #1d2429;
+  --primary: #0a7f58;
+  --primary-foreground: #ffffff;
+  --secondary: #e8ecef;
+  --secondary-foreground: #2c363c;
+  --muted: #e8ecef;
+  --muted-foreground: #5f6c74;
+  --accent: #e4e9ec;
+  --accent-foreground: #1d2429;
+  --destructive: #d23b41;
+  --border: #dbe0e4;
+  --input: #c9d0d5;
+  --ring: #0a7f58;
+  --sidebar: #e9edf0;
 }
 
 @theme inline {

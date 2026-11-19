@@ -1,4 +1,4 @@
-import { Mail, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Mail, Pencil, Plus, Search, ShieldOff, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "@/auth/AuthContext";
 import { ErrorText, Field } from "@/components/Field";
@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
-import { GROUPS, GROUP_LABEL, type Group, type Page, type StaffMember } from "@/lib/types";
+import { GROUPS, GROUP_LABEL, SERVICES, SERVICE_LABEL, type Group, type Page, type Service, type StaffMember } from "@/lib/types";
 import { useDebounced, useFetch } from "@/lib/useFetch";
 
 const PAGE_SIZE = 25;
@@ -116,6 +116,20 @@ export function StaffPage() {
                     <Button variant="ghost" size="icon" aria-label={`Edit ${m.name}`} onClick={() => setEditing(m)}>
                       <Pencil />
                     </Button>
+                    {isAdmin && m.id !== user?.id && m.twoFactor && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Reset two-factor authentication of ${m.name}`}
+                        title="Reset two-factor authentication"
+                        onClick={() =>
+                          confirm(`Reset two-factor authentication for ${m.name}? They are signed out and must set it up again.`) &&
+                          void run(() => api(`/users/${m.id}/two-factor/reset`, { method: "POST" }), `Two-factor authentication reset for ${m.name}.`)
+                        }
+                      >
+                        <ShieldOff />
+                      </Button>
+                    )}
                     {isAdmin && m.id !== user?.id && (
                       <Button
                         variant="ghost"
@@ -190,6 +204,7 @@ function StaffDialog({
     cardUid: member?.cardUid ?? "",
     department: member?.department ?? "",
     jobTitle: member?.jobTitle ?? "",
+    service: (member?.service ?? "") as Service | "",
     phone: member?.phone ?? "",
     password: "",
     sendInvite: !member,
@@ -203,17 +218,17 @@ function StaffDialog({
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { password, sendInvite, disabled, cardUid, email, ...fields } = form;
+    const { password, sendInvite, disabled, cardUid, email, service, ...fields } = form;
     try {
       if (member) {
         // An empty card field removes the card.
         await api(`/users/${member.id}`, {
           method: "PATCH",
-          body: { ...fields, email: email || undefined, cardUid: cardUid || null, disabled, ...(password && { password }) },
+          body: { ...fields, email: email || undefined, cardUid: cardUid || null, service: service || null, disabled, ...(password && { password }) },
         });
       } else {
         await api("/users", {
-          body: { ...fields, email: email || undefined, ...(cardUid && { cardUid }), ...(password && { password }), sendInvite },
+          body: { ...fields, email: email || undefined, ...(cardUid && { cardUid }), ...(service && { service }), ...(password && { password }), sendInvite },
         });
       }
       onSaved();
@@ -270,6 +285,16 @@ function StaffDialog({
               <Input id="s-title" maxLength={100} value={form.jobTitle} onChange={set("jobTitle")} />
             </Field>
           </div>
+          <Field label="Faculty service" htmlFor="s-service" hint="Choose a service to list this person on the Faculty screens, where they (or you) can show their availability.">
+            <Select id="s-service" value={form.service} onChange={set("service")}>
+              <option value="">Not listed</option>
+              {SERVICES.map((s) => (
+                <option key={s} value={s}>
+                  {SERVICE_LABEL[s]}
+                </option>
+              ))}
+            </Select>
+          </Field>
           <Field label="Phone" htmlFor="s-phone">
             <Input id="s-phone" type="tel" maxLength={40} value={form.phone} onChange={set("phone")} />
           </Field>

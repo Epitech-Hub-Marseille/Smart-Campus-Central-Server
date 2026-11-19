@@ -1,3 +1,4 @@
+import { AVAILABILITIES, SERVICES } from "@smartcampus/protocol";
 import { Schema, model, type HydratedDocument, type InferSchemaType } from "mongoose";
 
 /**
@@ -47,6 +48,36 @@ const identitySchema = new Schema(
   { _id: false },
 );
 
+/** What a person shows on the Faculty screens. `until` makes it lapse by itself (back at 14:00). */
+const availabilitySchema = new Schema(
+  {
+    status: { type: String, enum: AVAILABILITIES, default: "available", required: true },
+    note: { type: String, trim: true, default: "" },
+    until: { type: Date },
+    updatedAt: { type: Date, default: () => new Date() },
+  },
+  { _id: false },
+);
+
+/**
+ * Two-factor authentication (TOTP). The secret is stored encrypted; recovery codes only as hashes. `lastUsedStep` makes a
+ * code single-use, and `failures`/`lockedUntil` slow down guessing.
+ */
+const twoFactorSchema = new Schema(
+  {
+    enabled: { type: Boolean, default: false },
+    enabledAt: { type: Date },
+    secret: { type: String },
+    // A secret being set up: it only replaces the real one once the person proved they can produce a code from it.
+    pendingSecret: { type: String },
+    lastUsedStep: { type: Number, default: -1 },
+    recoveryHashes: { type: [String], default: [] },
+    failures: { type: Number, default: 0 },
+    lockedUntil: { type: Date },
+  },
+  { _id: false },
+);
+
 const userSchema = new Schema(
   {
     // Optional: a student who only has a card has no console login. The unique index ignores missing emails.
@@ -59,9 +90,13 @@ const userSchema = new Schema(
     passwordHash: { type: String },
     identities: { type: [identitySchema], default: [] },
     department: { type: String, trim: true },
+    // Set for people who appear in the Faculty availability list. Absent: not listed.
+    service: { type: String, enum: SERVICES },
+    availability: { type: availabilitySchema },
     jobTitle: { type: String, trim: true },
     phone: { type: String, trim: true },
     disabled: { type: Boolean, default: false },
+    twoFactor: { type: twoFactorSchema },
   },
   { timestamps: true },
 );
@@ -84,9 +119,23 @@ export interface PublicUser {
   name: string;
   role: Role;
   groups: Group[];
+  /** Whether it is on, and whether this person must have it (the console sends admins to set it up). */
+  twoFactor: { enabled: boolean; required: boolean };
 }
 
 export function toPublicUser(user: UserDoc): PublicUser {
   const groups = user.groups as Group[];
-  return { id: user.id, email: user.email ?? null, name: user.name, role: roleOf(groups), groups };
+  const role = roleOf(groups);
+  return {
+    id: user.id,
+    email: user.email ?? null,
+    name: user.name,
+    role,
+    groups,
+    twoFactor: { enabled: Boolean(user.twoFactor?.enabled), required: role === "admin" && twoFactorRequiredForAdmins() },
+  };
 }
+
+// Read when asked, not at import, so the setting can be changed in tests and the model does not import the config twice.
+import { config } from "../config.js";
+const twoFactorRequiredForAdmins = () => config.REQUIRE_ADMIN_2FA;

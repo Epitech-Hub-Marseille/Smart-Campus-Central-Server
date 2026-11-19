@@ -1,0 +1,47 @@
+# Local text-to-speech on an NVIDIA GPU, added on top of the dev stack:
+#   docker compose -f docker-compose.dev.yml -f docker-compose.tts.yml up
+# Needs Docker Desktop with the WSL2 backend and an NVIDIA driver (check: docker run --rm --gpus all ubuntu nvidia-smi).
+# The engine is Kokoro (Apache-2.0, 82M parameters, a few GB of VRAM at most) behind an OpenAI-compatible
+# /v1/audio/speech endpoint, which is what the server speaks (see README, "Voice announcements").
+# The first start downloads the image (several GB) and the model; later starts reuse the `tts-models` volume.
+name: smartcampus-dev
+
+services:
+  tts:
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:latest
+    ports:
+      # Only on this machine: the engine has no authentication.
+      - "127.0.0.1:8880:8880"
+    volumes:
+      - tts-models:/app/api/src/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8880/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  server:
+    environment:
+      TTS_URL: http://tts:8880/v1
+      TTS_MODEL: kokoro
+      # Voices are id|label|language, comma separated: a label cannot contain a comma.
+      # Kokoro voice ids: the first letter is the language (a American, b British, f French), the second the gender.
+      TTS_VOICES: "af_heart|Heart (female)|en,am_michael|Michael (male)|en,bm_george|George (male - serious)|en,ff_siwis|Siwis (female)|fr"
+      # Reads emergencies: a grave British male voice, slowly. Listen to the candidates and change it here if you prefer another
+      # (am_onyx and am_fenrir are the other deep ones). Kokoro has no French male voice, so alerts are read in English.
+      TTS_EMERGENCY_VOICE: bm_george
+      TTS_EMERGENCY_SPEED: "0.9"
+    depends_on:
+      tts:
+        condition: service_healthy
+
+volumes:
+  tts-models:

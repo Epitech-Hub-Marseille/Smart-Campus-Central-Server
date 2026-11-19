@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { PROTOCOL_VERSION } from "./constants.js";
 import { EMERGENCY_KINDS } from "./emergency.js";
+import { assetRef, wireScene, TILE_LIMITS } from "./screens.js";
+import { themeSpec } from "./theme.js";
 import { ULID_REGEX } from "./ulid.js";
 
 /** Envelope shared by every message after the handshake. */
@@ -56,6 +58,13 @@ export const roomStatusValue = z.object({
   since: z.number().int().nonnegative().optional(),
 });
 
+/** Services of the staff directory shown on Faculty screens. */
+export const SERVICES = ["pedagogical", "administrative"] as const;
+export type Service = (typeof SERVICES)[number];
+
+export const AVAILABILITIES = ["available", "busy", "away", "absent"] as const;
+export type Availability = (typeof AVAILABILITIES)[number];
+
 export const DISPLAY_LAYOUTS = ["standard", "compact", "split"] as const;
 export const DISPLAY_THEMES = ["dark", "light"] as const;
 
@@ -79,11 +88,63 @@ export const displayConfig = z.object({
       capacity: z.boolean().default(true),
       clock: z.boolean().default(true),
       announcements: z.boolean().default(true),
+      nextReservation: z.boolean().default(true),
     })
     .default({}),
   sleep: timeWindow.default({}),
 });
 export type DisplayConfig = z.infer<typeof displayConfig>;
+
+/**
+ * How a Faculty screen looks. `service` filters the staff list (the server also filters what it
+ * sends, so the frame stays small). The screen fetches the weather itself from `weather`'s position.
+ */
+export const facultyConfig = z.object({
+  /** Who the screen belongs to: the header of the board and the details of the emergency screen. */
+  site: z
+    .object({
+      name: z.string().trim().max(80).default(""),
+      subtitle: z.string().trim().max(120).default(""),
+      /** Building or zone, shown on the emergency screen. */
+      zone: z.string().trim().max(60).default(""),
+      assemblyPoint: z.string().trim().max(80).default(""),
+      emergencyNumber: z.string().trim().max(30).default(""),
+      logo: assetRef.nullable().default(null),
+    })
+    .default({}),
+  service: z.enum(["all", ...SERVICES]).default("all"),
+  /** `enabled: false` holds the first scene instead of rotating. The scenes themselves come in `carousel.set`. */
+  carousel: z.object({ enabled: z.boolean().default(true) }).default({}),
+  widgets: z
+    .object({
+      clock: z.boolean().default(true),
+      date: z.boolean().default(true),
+      weather: z.boolean().default(false),
+    })
+    .default({}),
+  weather: z
+    .object({
+      label: z.string().trim().max(60).default(""),
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+    })
+    .nullable()
+    .default(null),
+});
+export type FacultyConfig = z.infer<typeof facultyConfig>;
+
+/** One entry of the reservation list. Times are ms since epoch. */
+export const reservationItem = z.object({
+  id: z.string().min(1).max(64),
+  title: z.string().max(100),
+  start: z.number().int().nonnegative(),
+  end: z.number().int().nonnegative(),
+  organizer: z.string().max(60).optional(),
+});
+
+// Counts and field lengths are sized so a worst-case snapshot (multi-byte text) still fits in MAX_FRAME_BYTES once
+// encrypted and base64-encoded; the size test in protocol.test.ts proves it.
+export const FACULTY_LIMITS = { news: 8, staff: 40, reservations: 15 } as const;
 
 // ---- Server -> device ------------------------------------------------------------------
 
@@ -122,6 +183,76 @@ export const audioSettingsSet = msg(
   z.object({ volume: z.number().int().min(0).max(100), quietHours: timeWindow }),
 );
 
+/**
+ * The visual theme of a door unit or a Faculty screen, or `null` to go back to the app's own look. Part of the desired
+ * state. See theme.ts for what a theme may and may not contain.
+ */
+export const themeSet = msg("theme.set", z.object({ theme: themeSpec.nullable() }));
+
+/** Faculty screen look: carousel, widgets and staff service filter. */
+export const facultyConfigSet = msg("faculty.config.set", z.object({ config: facultyConfig }));
+
+/**
+ * Everything a Faculty screen rotates through, as one snapshot that replaces the previous one.
+ * Items carry their own expiry, so a screen that is offline hides stale news by itself.
+ */
+export const facultyContentSet = msg(
+  "faculty.content.set",
+  z.object({
+    news: z
+      .array(
+        z.object({
+          id: z.string().min(1).max(64),
+          title: z.string().max(120),
+          text: z.string().max(400),
+          priority: z.enum(ANNOUNCE_PRIORITIES),
+          publishedAt: z.number().int().nonnegative(),
+          expiresAt: z.number().int().optional(),
+        }),
+      )
+      .max(FACULTY_LIMITS.news),
+    staff: z
+      .array(
+        z.object({
+          id: z.string().min(1).max(64),
+          name: z.string().max(80),
+          service: z.enum(SERVICES),
+          jobTitle: z.string().max(60).optional(),
+          availability: z.enum(AVAILABILITIES),
+          note: z.string().max(60).optional(),
+          /** When the availability stops applying; afterwards the screen shows the person as available. */
+          until: z.number().int().optional(),
+        }),
+      )
+      .max(FACULTY_LIMITS.staff),
+    reservations: z.array(reservationItem.extend({ room: z.string().max(60) })).max(FACULTY_LIMITS.reservations),
+    updatedAt: z.number().int().nonnegative(),
+  }),
+);
+
+/**
+ * What a Faculty screen rotates through: its scenes, as one snapshot that replaces the previous one. Like the
+ * Faculty content it is derived data (the server resolves group and screen layers and the library files), rebuilt
+ * on connection rather than kept in the twin. A screen switches to a new carousel only once every file in it is
+ * downloaded and verified, and keeps the old one until then.
+ */
+export const carouselSet = msg(
+  "carousel.set",
+  z.object({
+    scenes: z
+      .array(wireScene)
+      .max(TILE_LIMITS.scenes)
+      .refine((scenes) => scenes.reduce((n, s) => n + s.tiles.length, 0) <= TILE_LIMITS.tiles, `at most ${TILE_LIMITS.tiles} tiles in total`),
+    updatedAt: z.number().int().nonnegative(),
+  }),
+);
+
+/** Upcoming reservations of the room a door screen is linked to (the screen shows the next one). */
+export const reservationsSet = msg(
+  "reservations.set",
+  z.object({ roomId: z.string().min(1).max(64), items: z.array(reservationItem).max(5) }),
+);
+
 export const announceShow = msg(
   "announce.show",
   z.object({
@@ -145,6 +276,8 @@ export const audioPlay = msg(
     assetId: z.string().min(1).max(64),
     sha256: z.string().regex(/^[0-9a-f]{64}$/),
     size: z.number().int().positive(),
+    /** Plays at full volume and ignores quiet hours. Only for emergencies. */
+    urgent: z.boolean().default(false),
   }),
 );
 
@@ -167,7 +300,18 @@ export const emergencySet = msg(
   }),
 );
 
-export const emergencyClear = msg("emergency.clear", z.object({ emergencyId: z.string().min(1).max(64) }));
+/** Bounds of how long the end-of-emergency notice stays on screen. A screen uses its own default (120 s) when none is given. */
+export const END_NOTICE_SECONDS = { min: 10, max: 900, default: 120 } as const;
+
+/** `message` is the end-of-emergency notice the screen shows for `noticeSeconds` after the alarm stops. */
+export const emergencyClear = msg(
+  "emergency.clear",
+  z.object({
+    emergencyId: z.string().min(1).max(64),
+    message: z.string().trim().min(1).max(400).optional(),
+    noticeSeconds: z.number().int().min(END_NOTICE_SECONDS.min).max(END_NOTICE_SECONDS.max).optional(),
+  }),
+);
 
 export const accessAclSync = msg(
   "access.acl.sync",
@@ -284,6 +428,11 @@ export const serverMessage = z.discriminatedUnion("type", [
   roomStatusSet,
   roomInfoSet,
   displayConfigSet,
+  themeSet,
+  facultyConfigSet,
+  facultyContentSet,
+  carouselSet,
+  reservationsSet,
   audioSettingsSet,
   announceShow,
   announceClear,
@@ -308,6 +457,11 @@ export const COMMAND_TYPES = [
   "room.status.set",
   "room.info.set",
   "display.config.set",
+  "theme.set",
+  "faculty.config.set",
+  "faculty.content.set",
+  "carousel.set",
+  "reservations.set",
   "audio.settings.set",
   "announce.show",
   "announce.clear",

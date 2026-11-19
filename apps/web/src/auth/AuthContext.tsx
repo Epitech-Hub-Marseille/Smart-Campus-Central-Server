@@ -8,6 +8,8 @@ export interface User {
   name: string;
   role: Role;
   groups: Group[];
+  /** Whether it is on, and whether this person must have it (administrators): the console sends them to set it up. */
+  twoFactor: { enabled: boolean; required: boolean };
 }
 
 export interface Providers {
@@ -29,7 +31,12 @@ interface AuthState {
   idleWarning: number | null;
   /** Counts as activity right now (used by the "stay signed in" button). */
   keepAlive: () => void;
-  login: (email: string, password: string) => Promise<void>;
+  /** Resolves with a challenge when a second factor is needed, and nothing once signed in. */
+  login: (email: string, password: string) => Promise<{ challenge: string } | void>;
+  /** The second half of the sign-in. */
+  completeTwoFactor: (challenge: string, input: { code?: string; recoveryCode?: string }) => Promise<void>;
+  /** Reads the user again (after setting two-factor up, say). */
+  refreshUser: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -119,9 +126,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const r = await api<{ user: User; session: Session }>("/auth/login", { body: { email, password } });
+    const r = await api<{ user: User; session: Session } | { twoFactorRequired: true; challenge: string }>("/auth/login", { body: { email, password } });
+    if ("twoFactorRequired" in r) return { challenge: r.challenge };
     setSessionExpired(false);
     setSession(r.session);
+    setUser(r.user);
+  }, []);
+
+  const completeTwoFactor = useCallback(async (challenge: string, input: { code?: string; recoveryCode?: string }) => {
+    const r = await api<{ user: User; session: Session }>("/auth/login/2fa", { body: { challenge, ...input } });
+    setSessionExpired(false);
+    setSession(r.session);
+    setUser(r.user);
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    const r = await api<{ user: User; session: Session }>("/auth/me");
     setUser(r.user);
   }, []);
 
@@ -132,8 +152,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, providers, sessionExpired, idleWarning, keepAlive, login, logout }),
-    [user, loading, providers, sessionExpired, idleWarning, keepAlive, login, logout],
+    () => ({ user, loading, providers, sessionExpired, idleWarning, keepAlive, login, completeTwoFactor, refreshUser, logout }),
+    [user, loading, providers, sessionExpired, idleWarning, keepAlive, login, completeTwoFactor, refreshUser, logout],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

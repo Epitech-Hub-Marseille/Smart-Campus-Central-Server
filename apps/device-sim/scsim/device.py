@@ -159,7 +159,49 @@ class DeviceBehaviour:
             self.announcements[p["announcementId"]] = p.get("expiresAt")
             log(f"  ANNOUNCEMENT [{p.get('priority', 'info')}] {p.get('title') or ''} {p['text']}")
         elif t == "audio.play":
-            log(f"  would download asset {p['assetId']} ({p['size']} bytes) and verify sha256 {p['sha256'][:12]}...")
+            urgent = " [URGENT: ignores quiet hours]" if p.get("urgent") else ""
+            log(f"  would download asset {p['assetId']} ({p['size']} bytes) and verify sha256 {p['sha256'][:12]}...{urgent}")
+        elif t == "reservations.set":
+            self.state["reservations"] = len(p["items"])
+            now_ms = int(time.time() * 1000)
+            # The screen shows the current or next booking that has not ended, and drops past ones by itself.
+            upcoming = sorted((r for r in p["items"] if r["end"] > now_ms), key=lambda r: r["start"])
+            log(f"  reservations of room {p['roomId']}: {len(upcoming)} to come" + (f", next: {upcoming[0]['title']}" if upcoming else ""))
+        elif t == "theme.set":
+            theme = p["theme"]
+            self.state["theme"] = theme["id"] if theme else None
+            if theme:
+                colors = theme["tokens"].get("colors", {})
+                log(f"  theme: {theme['name']} v{theme['version']}, {len(colors)} colour(s), css {len(theme.get('css', ''))} chars")
+            else:
+                log("  theme: none, back to the app's own look")
+        elif t == "faculty.config.set":
+            c = p["config"]
+            self.state["faculty"] = {"service": c["service"], "rotate": c["carousel"]["enabled"]}
+            site = c["site"]["name"] or "(no name)"
+            logo = c["site"]["logo"]["assetId"] if c["site"]["logo"] else "none"
+            log(f"  faculty config: site {site}, logo {logo}, staff {c['service']}, rotation {'on' if c['carousel']['enabled'] else 'held'}, widgets {c['widgets']}")
+        elif t == "carousel.set":
+            # A screen skips a tile kind it does not know, which lets the server add kinds before every screen is updated.
+            known = {"news", "staff", "reservations", "image", "video", "text", "web", "radio", "stream", "youtube"}
+            now_ms = int(time.time() * 1000)
+            scenes = [s for s in p["scenes"] if s.get("endsAt") is None or s["endsAt"] > now_ms]
+            self.state["scenes"] = len(scenes)
+            log(f"  carousel: {len(scenes)} scene(s)")
+            for s in scenes:
+                tiles = ", ".join(t["kind"] if t["kind"] in known else f"{t['kind']} (unknown, skipped)" for t in s["tiles"])
+                log(f"    {s['layout']:<12} {s['durationSeconds']:>3}s  {s.get('name') or s['id']}: {tiles}")
+                for t in s["tiles"]:
+                    asset = t["settings"].get("asset")
+                    if asset:
+                        log(f"      would download asset {asset['assetId']} ({asset['size']} bytes) and verify sha256 {asset['sha256'][:12]}...")
+        elif t == "faculty.content.set":
+            now_ms = int(time.time() * 1000)
+            news = [n for n in p["news"] if n.get("expiresAt") is None or n["expiresAt"] > now_ms]
+            # An availability that has an end time in the past counts as available again.
+            away = [s["name"] for s in p["staff"] if s["availability"] != "available" and (s.get("until") is None or s["until"] > now_ms)]
+            self.state["facultyNews"] = len(news)
+            log(f"  faculty content: {len(news)} news, {len(p['staff'])} staff ({len(away)} not available), {len(p['reservations'])} reservation(s)")
         elif t == "emergency.set":
             self.state["emergency"] = p["emergencyId"]
             log(f"  EMERGENCY {p['title']} ({p['kind']}){' [test, volume ' + str(p['testVolume']) + ']' if p['testMode'] else ''}: {p['instructions']}")
@@ -168,6 +210,8 @@ class DeviceBehaviour:
             if self.state.get("emergency") == p["emergencyId"]:
                 self.state.pop("emergency", None)
             log(f"  emergency {p['emergencyId']} cleared")
+            if p.get("message"):
+                log(f"  END-OF-EMERGENCY NOTICE: {p['message']}")
         elif t == "registration.mode.set":
             if p["active"]:
                 self.state["registration"] = p["sessionId"]

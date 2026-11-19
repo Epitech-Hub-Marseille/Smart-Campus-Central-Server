@@ -7,7 +7,7 @@ export function IdleWarning() {
   if (idleWarning === null) return null;
 
   return (
-    <div role="alertdialog" aria-live="assertive" className="fixed inset-0 z-[60] grid place-items-center bg-black/70 px-4">
+    <div role="alertdialog" aria-live="assertive" className="fixed inset-0 z-[60] grid place-items-center bg-black/40 px-4">
       <div className="w-full max-w-sm rounded-xl border bg-card p-6 shadow-lg shadow-black/50">
         <h2 className="text-lg font-semibold">Still there?</h2>
         <p className="mt-2 text-sm text-muted-foreground">
