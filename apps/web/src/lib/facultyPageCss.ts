@@ -338,3 +338,200 @@ svg {
 .tag-urgent {
   background: var(--danger);
 }`;
+
+/** The same for an alert: the rules of the emergency takeover, so the preview shows what a screen shows when one starts. */
+export const FACULTY_ALERT_CSS = `html {
+  font-size: calc(min(100vw / 120, 100vh / 67.5) * var(--scale, 1));
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--page);
+  cursor: none;
+}
+
+ul {
+  list-style: none;
+}
+
+svg {
+  flex: none;
+}
+
+.emergency,
+.end-notice {
+  --yellow: #ffff55;
+  --kind: #a80000;
+  --bg: var(--em-solid, var(--kind));
+  display: flex;
+  height: 100%;
+  padding: 2.5rem 4rem;
+  background: var(--bg);
+  color: #fff;
+  font-family: var(--em-font-body, ui-monospace, "DejaVu Sans Mono", "Liberation Mono", "Courier New", monospace);
+  font-weight: 700;
+}
+
+.emergency[data-kind="biohazard"] { --kind: #1f5f1f; }
+
+.emergency[data-kind="nuclear"] { --kind: #5a4a00; }
+
+.emergency[data-kind="bomb"] { --kind: #8a0030; }
+
+.emergency[data-kind="seismic"] { --kind: #8a3a00; }
+
+.emergency[data-kind="power"] { --kind: #0a3d8a; }
+
+.end-notice { --kind: #0a5a1f; }
+
+.alert-frame {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 1.4rem;
+  padding: 1.8rem 2.2rem 0;
+  border: 0.3rem solid #fff;
+  border-radius: var(--em-radius, 0);
+  box-shadow: inset 0 0 0 0.5rem var(--bg), inset 0 0 0 0.7rem #fff;
+  overflow: hidden;
+}
+
+.alert-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 0.5rem 1.2rem;
+  background: #fff;
+  color: var(--bg);
+  font-size: 1.8rem;
+  letter-spacing: 0.06em;
+  border-radius: var(--em-radius, 0);
+}
+
+.alert-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2.4rem;
+}
+
+.alert-title svg {
+  width: 7.5rem;
+  height: 7.5rem;
+  color: #000;
+  fill: var(--yellow);
+  stroke-width: 1.6;
+}
+
+.alert-title h1 {
+  font-family: var(--em-font-heading, inherit);
+  font-size: 8.2rem;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--yellow);
+}
+
+.alert-detail {
+  text-align: center;
+  font-size: 2.9rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.alert-call {
+  align-self: center;
+  padding: 0.6rem 2.4rem;
+  background: #fff;
+  color: var(--bg);
+  font-size: 3.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: var(--em-radius, 0);
+}
+
+.steps {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 1.2rem 0 0;
+  border-top: 0.2rem dashed #fff;
+  background: var(--em-card, transparent);
+  list-style: none;
+  font-size: 2.5rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  overflow: hidden;
+}
+
+.steps li {
+  padding: 0.2rem 1.2rem;
+  border-radius: var(--em-radius, 0);
+}
+
+.steps li span {
+  color: var(--yellow);
+}
+
+.steps li:first-child {
+  background: #fff;
+  color: var(--bg);
+}
+
+.steps li:first-child span {
+  color: inherit;
+}
+
+.alert-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.7rem 1.6rem;
+  background: var(--yellow);
+  color: #000;
+  font-size: 3rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: var(--em-radius, 0);
+}
+
+.stripes {
+  flex: none;
+  height: 5rem;
+  margin: 0 -2.2rem;
+  background: repeating-linear-gradient(45deg, var(--yellow) 0 2.4rem, #000 2.4rem 4.8rem);
+}
+
+.frame-bar .stripes {
+  height: 2.2rem;
+  background: var(--yellow);
+}
+
+.end-notice .alert-frame {
+  padding-bottom: 2.2rem;
+  justify-content: center;
+}
+
+.end-notice .alert-detail {
+  font-size: 3.4rem;
+  line-height: 1.3;
+  text-transform: none;
+}
+
+.end-notice .alert-title svg {
+  fill: none;
+  color: var(--yellow);
+}`;

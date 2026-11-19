@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { api, ApiError } from "@/lib/api";
 import type { Device } from "@/lib/types";
-import { FACULTY_PAGE_CSS } from "@/lib/facultyPageCss";
+import { FACULTY_ALERT_CSS, FACULTY_PAGE_CSS } from "@/lib/facultyPageCss";
 import { useFetch } from "@/lib/useFetch";
 import { cn } from "@/lib/utils";
 
@@ -26,8 +26,16 @@ interface Theme {
   tokens: Tokens;
   /** Font files by slot: ids of fonts in the library. */
   fonts: Partial<Record<string, string>>;
+  /** How an alert is dressed; empty means the default alert. */
+  emergency: EmergencySettings;
   css: string;
   version: number;
+}
+interface EmergencySettings {
+  fonts?: boolean;
+  frame?: string;
+  radius?: number;
+  colors?: { background?: string; card?: string };
 }
 interface FontAsset {
   id: string;
@@ -39,6 +47,8 @@ interface Schema {
   colors: string[];
   fonts: string[];
   fontSlots: string[];
+  emergencyFrames: string[];
+  emergencyMinContrast: number;
   limits: { fontBytes: number; css: number; name: number; scaleMin: number; scaleMax: number; radiusMax: number };
 }
 interface Assignment {
@@ -71,9 +81,20 @@ const FONT_STACK: Record<string, string> = {
 /** The colours a screen uses when a theme does not say, so the preview of a partial theme is honest. */
 const BASE = { background: "#ffffff", surface: "#f5f7fc", text: "#101828", muted: "#5b667a", primary: "#1d4f9f", primaryText: "#ffffff", border: "#dfe4ee", success: "#1f9d55", warning: "#c77700", danger: "#d1332b" };
 
+const FRAME_LABEL: Record<string, string> = { stripes: "Hazard stripes (default)", bar: "Plain band" };
+
+/** Contrast of white text on a "#rrggbb" background (WCAG), the same rule the server and the devices apply to an alert's colours. */
+function contrastOnWhite(color: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const channel = parseInt(color.slice(i, i + 2), 16) / 255;
+    return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  return 1.05 / (0.2126 * r! + 0.7152 * g! + 0.0722 * b! + 0.05);
+}
+
 const SLOT_LABEL: Record<string, string> = { body: "Body text", heading: "Headings", mono: "Data (monospace)" };
 
-const blank = (): Theme => ({ id: "", name: "", description: "", tokens: { colors: {}, typography: {}, shape: {} }, fonts: {}, css: "", version: 0 });
+const blank = (): Theme => ({ id: "", name: "", description: "", tokens: { colors: {}, typography: {}, shape: {} }, fonts: {}, emergency: {}, css: "", version: 0 });
 
 /** The font files of a theme as data URLs, so the preview frame (which has no network) can use them. Slots that fail to load are left out. */
 function usePreviewFonts(fonts: Theme["fonts"]): Record<string, string> {
@@ -122,7 +143,7 @@ export function ThemesPage() {
     <div>
       <PageHeader
         title="Themes"
-        description="The look of the door units and the Faculty screens: colours, font, text size and corners as JSON, and optional CSS for the Faculty screens. Emergency alerts are never themed."
+        description="The look of the door units and the Faculty screens: colours, font, text size and corners as JSON, and optional CSS for the Faculty screens. Emergency alerts keep their colour, wording and alarm, and can only be dressed through the section below."
         actions={
           <Button onClick={() => setSelected("new")}>
             <Plus /> New theme
@@ -176,6 +197,9 @@ export function ThemesPage() {
 
 function Editor({ theme, schema, onSaved, onDeleted }: { theme: Theme; schema: Schema; onSaved: (id: string) => void; onDeleted: () => void }) {
   const [draft, setDraft] = useState<Theme>(theme);
+  // The theme changed under the editor (a ZIP import, a save): show what the server now has. Symptom this fixes: after an
+  // import the editor kept the old values, and pressing Save wrote them back over the imported theme.
+  useEffect(() => setDraft(theme), [theme.version]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -195,6 +219,18 @@ function Editor({ theme, schema, onSaved, onDeleted }: { theme: Theme; schema: S
     else delete colors[name];
     edit({ tokens: { ...draft.tokens, colors } });
   };
+
+  const setAlert = (patch: Partial<EmergencySettings>) => edit({ emergency: { ...draft.emergency, ...patch } });
+  const setAlertColor = (name: "background" | "card", value: string | undefined) => {
+    const colors = { ...draft.emergency.colors };
+    if (value) colors[name] = value;
+    else delete colors[name];
+    setAlert({ colors });
+  };
+  const alertProblems = (["background", "card"] as const).flatMap((name) => {
+    const value = draft.emergency.colors?.[name];
+    return value && contrastOnWhite(value) < schema.emergencyMinContrast ? [`The alert's ${name} colour is too light for white text (contrast ${contrastOnWhite(value).toFixed(1)}:1, at least ${schema.emergencyMinContrast}:1 is needed)`] : [];
+  });
 
   const setFont = (slot: string, id: string) => {
     const fonts = { ...draft.fonts };
@@ -217,7 +253,7 @@ function Editor({ theme, schema, onSaved, onDeleted }: { theme: Theme; schema: S
     setBusy(true);
     setError(null);
     try {
-      const body = { name: draft.name, description: draft.description, tokens: draft.tokens, fonts: draft.fonts, css: draft.css };
+      const body = { name: draft.name, description: draft.description, tokens: draft.tokens, fonts: draft.fonts, emergency: draft.emergency, css: draft.css };
       const result = isNew ? await api<Theme>("/themes", { body }) : await api<Theme>(`/themes/${theme.id}`, { method: "PUT", body });
       setSaved(true);
       onSaved(result.id);
@@ -261,7 +297,7 @@ function Editor({ theme, schema, onSaved, onDeleted }: { theme: Theme; schema: S
       if (found) fonts[slot] = found.id;
       else missing.push(name);
     }
-    edit({ name: draft.name || json.name || file.name.replace(/\.json$/i, ""), description: json.description ?? draft.description, tokens, fonts: { ...draft.fonts, ...fonts }, css: json.css ?? draft.css });
+    edit({ name: draft.name || json.name || file.name.replace(/\.json$/i, ""), description: json.description ?? draft.description, tokens, fonts: { ...draft.fonts, ...fonts }, emergency: json.emergency ?? draft.emergency, css: json.css ?? draft.css });
     if (missing.length > 0) setError(`Upload these fonts to the library, then import the file again: ${missing.join(", ")}.`);
   }
 
@@ -394,6 +430,57 @@ function Editor({ theme, schema, onSaved, onDeleted }: { theme: Theme; schema: S
             <input ref={fontFile} type="file" accept=".woff2,.woff,.ttf,.otf,font/*" className="sr-only" aria-label="Font file" onChange={(e) => (e.target.files?.[0] && void uploadFont(e.target.files[0]), (e.target.value = ""))} />
           </fieldset>
 
+          <fieldset>
+            <legend className="mb-1 text-sm leading-none font-medium">Emergency screens (optional)</legend>
+            <p className="mb-3 text-xs text-muted-foreground">
+              An alert keeps its colour, its wording, its alarm and its white text whatever the theme says. A theme can only choose the points below; anything a device cannot apply
+              shows the default alert.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field label="Frame" htmlFor="t-em-frame">
+                <Select id="t-em-frame" value={draft.emergency.frame ?? "stripes"} onChange={(e) => setAlert({ frame: e.target.value })}>
+                  {schema.emergencyFrames.map((f) => (
+                    <option key={f} value={f}>
+                      {FRAME_LABEL[f] ?? f}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label={draft.emergency.radius === undefined ? "Corners: app default" : `Corners: ${draft.emergency.radius}`} htmlFor="t-em-radius">
+                <input id="t-em-radius" type="range" min={0} max={schema.limits.radiusMax} step={1} value={draft.emergency.radius ?? 10} onChange={(e) => setAlert({ radius: Number(e.target.value) })} className="w-full accent-primary" />
+              </Field>
+              <label className="flex items-center gap-2 self-end pb-2 text-sm">
+                <input type="checkbox" checked={draft.emergency.fonts ?? false} onChange={(e) => setAlert({ fonts: e.target.checked })} className="size-4 accent-primary" />
+                Use the theme's font files
+              </label>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              {(["background", "card"] as const).map((name) => {
+                const value = draft.emergency.colors?.[name];
+                const label = name === "background" ? "Alert background" : "Panel behind the steps";
+                return (
+                  <div key={name} className="flex items-center gap-3">
+                    <input type="color" aria-label={label} value={value ?? (name === "background" ? "#07080a" : "#1a1210")} onChange={(e) => setAlertColor(name, e.target.value)} className="size-9 shrink-0 cursor-pointer rounded-md border bg-transparent p-0.5" />
+                    <span className="min-w-0 flex-1 text-sm">
+                      {label}
+                      <span className="block font-mono text-xs text-muted-foreground">{value ?? "app default"}</span>
+                    </span>
+                    {value && (
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setAlertColor(name, undefined)} aria-label={`Unset ${label}`}>
+                        Unset
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {alertProblems.length > 0 && (
+              <p role="alert" className="mt-2 text-sm text-destructive">
+                {alertProblems.join(". ")}.
+              </p>
+            )}
+          </fieldset>
+
           <Field label="CSS for the Faculty screens (optional)" htmlFor="t-css" hint={`${draft.css.length} / ${schema.limits.css}. Door units ignore it. No url(), @import or @font-face: nothing is loaded from elsewhere, fonts come from the files above.`}>
             <textarea
               id="t-css"
@@ -413,7 +500,7 @@ function Editor({ theme, schema, onSaved, onDeleted }: { theme: Theme; schema: S
           <ErrorText>{error}</ErrorText>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" onClick={() => void save()} disabled={busy || !draft.name.trim() || !dirty || hints.length > 0}>
+            <Button type="button" onClick={() => void save()} disabled={busy || !draft.name.trim() || !dirty || hints.length > 0 || alertProblems.length > 0}>
               {busy ? "Saving…" : isNew ? "Create theme" : "Save theme"}
             </Button>
             {saved && !dirty && <span role="status" className="text-sm text-primary">Saved.</span>}
@@ -430,7 +517,7 @@ function Editor({ theme, schema, onSaved, onDeleted }: { theme: Theme; schema: S
                 <Upload /> Import CSS
               </Button>
               <input ref={cssFile} type="file" accept="text/css,.css" className="sr-only" aria-label="Theme CSS file" onChange={(e) => (e.target.files?.[0] && void e.target.files[0].text().then((css) => edit({ css })), (e.target.value = ""))} />
-              <Button type="button" variant="outline" size="sm" onClick={() => download(`${slug}.json`, JSON.stringify({ name: draft.name, description: draft.description, tokens: draft.tokens, fontNames: fontNamesOf(draft.fonts), css: draft.css }, null, 2), "application/json")}>
+              <Button type="button" variant="outline" size="sm" onClick={() => download(`${slug}.json`, JSON.stringify({ name: draft.name, description: draft.description, tokens: draft.tokens, fontNames: fontNamesOf(draft.fonts), emergency: draft.emergency, css: draft.css }, null, 2), "application/json")}>
                 <Download /> JSON
               </Button>
               <Button type="button" variant="outline" size="sm" disabled={!draft.css} onClick={() => download(`${slug}.css`, draft.css, "text/css")}>
@@ -480,6 +567,23 @@ function facultyVariables(theme: Theme, fonts: Record<string, string>): string {
 }
 
 /**
+ * What a Faculty screen sets on an alert for a theme (the page's `emergencyVariables`): only the closed set the protocol allows.
+ * Font names use single quotes because the result goes inside a style="..." attribute.
+ */
+function alertVariables(theme: Theme, fonts: Record<string, string>): string {
+  const settings = theme.emergency;
+  const useFonts = settings.fonts === true;
+  const entries: [string, string | undefined][] = [
+    ["--em-radius", settings.radius === undefined ? undefined : `${settings.radius / 16}rem`],
+    ["--em-card", settings.colors?.card],
+    ["--em-solid", settings.colors?.background],
+    ["--em-font-body", useFonts && fonts.body ? `'sc-body', ui-monospace, 'DejaVu Sans Mono', monospace` : undefined],
+    ["--em-font-heading", useFonts && fonts.heading ? `'sc-heading', ui-monospace, 'DejaVu Sans Mono', monospace` : undefined],
+  ];
+  return entries.flatMap(([name, value]) => (value === undefined ? [] : [`${name}:${value};`])).join("");
+}
+
+/**
  * A preview of the two apps. The door unit is drawn here from the tokens. The Faculty screen is a small page in a frame with no
  * scripts and no network, so the CSS can be tried without touching this console.
  */
@@ -508,6 +612,17 @@ ${FACULTY_PAGE_CSS}
 <li class="news-card"><b class="ticker-tag">INFO</b><div><strong>New printers</strong><p>Available on every floor.</p></div></li></ul></section></div></main></div>`,
     [theme.tokens, theme.css, fontFaces],
   );
+  const alertDoc = useMemo(
+    () => `<!doctype html><meta charset="utf-8"><style>${fontFaces}
+${FACULTY_PAGE_CSS}
+${FACULTY_ALERT_CSS}</style>
+<div class="emergency${theme.emergency.frame === "bar" ? " frame-bar" : ""}" data-kind="fire" style="--accent:#ff5a36;${alertVariables(theme, fontData)}" role="alert"><div class="alert-frame">
+<div class="alert-head"><span>&gt;&gt; SMART CAMPUS SECURITY SYSTEM [S.C.S.S]</span><span>[Building B] <time>16:57</time></span></div>
+<div class="alert-title"><h1>Fire alert</h1></div><p class="alert-detail">Fire detected in the building.</p><p class="alert-call">&gt;&gt; Evacuate now &lt;&lt;</p>
+<ol class="steps"><li><span>&gt;&gt;</span> 1. Use the stairs. Do not use elevators.</li><li><span>&gt;&gt;</span> 2. Leave belongings. Go to the nearest exit now.</li><li><span>&gt;&gt;</span> 3. Assemble outside. Go to the assembly point.</li></ol>
+<p class="alert-foot"><span>&gt;&gt; EMERGENCY SERVICES</span><strong>[112]</strong></p><div class="stripes"></div></div></div>`,
+    [theme.emergency, theme.fonts, fontFaces],
+  );
   return (
     <Card>
       <CardHeader>
@@ -520,6 +635,8 @@ ${FACULTY_PAGE_CSS}
         <div>
           <div className="mb-2 text-xs font-medium text-muted-foreground">Faculty screen (with your CSS)</div>
           <iframe title="Faculty screen preview" sandbox="" srcDoc={srcDoc} className="aspect-video w-full rounded-lg border bg-white" />
+          <div className="mt-4 mb-2 text-xs font-medium text-muted-foreground">Faculty screen during an alert (fire, as an example)</div>
+          <iframe title="Faculty alert preview" sandbox="" srcDoc={alertDoc} className="aspect-video w-full rounded-lg border bg-black" />
         </div>
         <div>
           <div className="mb-2 text-xs font-medium text-muted-foreground">Door unit</div>

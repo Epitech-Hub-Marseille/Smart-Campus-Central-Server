@@ -391,7 +391,7 @@ function Trigger({ catalogue, onTriggered }: { catalogue: EmergencyInfo[]; onTri
 
         <div className="flex flex-col gap-2">
           <h3 className="text-sm font-medium text-muted-foreground">What the door screens will show</h3>
-          <EmergencyPreview kind={kind} color={info.color} title={info.title} instructions={info.instructions} testMode={testMode} />
+          <EmergencyPreview kind={kind} title={info.title} instructions={info.instructions} testMode={testMode} />
         </div>
       </CardContent>
     </Card>
