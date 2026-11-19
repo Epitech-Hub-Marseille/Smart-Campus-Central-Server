@@ -8,7 +8,9 @@ import { HttpError } from "../lib/errors.js";
 import { escapeRegex, objectId, optionalText, pagination, passwordSchema } from "../lib/http.js";
 import { hashPassword } from "../lib/password.js";
 import { assertCardFree, cardUidSchema } from "../domain/cards.js";
+import { notifyFacultyChanged } from "../domain/faculty.js";
 import { recordAudit } from "../lib/audit.js";
+import { SERVICES } from "@smartcampus/protocol";
 import { GROUPS, UserModel, type Group, type PublicUser, type UserDoc } from "../models/user.js";
 import { userDto } from "../models/userDto.js";
 
@@ -32,6 +34,8 @@ export const userFields = {
   ...personFields,
   groups: groupsField,
   cardUid: cardUidSchema,
+  // Faculty directory. null takes the person off the Faculty screens.
+  service: z.enum(SERVICES).nullable(),
 };
 
 const createInput = z.object({
@@ -40,6 +44,7 @@ const createInput = z.object({
   email: personFields.email.optional(),
   groups: userFields.groups.default([]),
   cardUid: userFields.cardUid.optional(),
+  service: userFields.service.optional(),
   password: passwordSchema.optional(),
   // Email the person a link to choose their own password.
   sendInvite: z.boolean().default(false),
@@ -114,8 +119,10 @@ usersRouter.patch("/:id", async (req, res) => {
   if (patch.disabled && user.id === actor.id) throw new HttpError(409, "You cannot disable yourself");
 
   const before = { groups: [...user.groups], hadCard: Boolean(user.cardUid) };
-  const { password, cardUid, ...fields } = patch;
+  const { password, cardUid, service, ...fields } = patch;
   user.set(fields);
+  // `null` takes the person off the Faculty screens (a null in the document would not read back as "unset").
+  if (service !== undefined) user.service = service ?? undefined;
   // `undefined` leaves the card alone, `null` removes it.
   if (cardUid !== undefined) user.cardUid = cardUid ?? undefined;
   if (password) user.passwordHash = await hashPassword(password);
@@ -123,6 +130,8 @@ usersRouter.patch("/:id", async (req, res) => {
   await auditAccess(actor, user, { before });
 
   if (password || patch.disabled) await revokeUserSessions(user._id);
+  // Name, job title, service and disabled all change what Faculty screens list.
+  if (user.service) await notifyFacultyChanged();
   res.json(userDto(user));
 });
 
@@ -143,6 +152,7 @@ usersRouter.delete("/:id", requireRole("admin"), async (req, res) => {
 
   await user.deleteOne();
   await revokeUserSessions(user._id);
+  if (user.service) await notifyFacultyChanged();
   res.status(204).end();
 });
 

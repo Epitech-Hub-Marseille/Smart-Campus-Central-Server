@@ -39,6 +39,17 @@ export interface Room {
   building: { id: string; code: string; name: string };
 }
 
+/** Mirrors SERVICES and AVAILABILITIES of @smartcampus/protocol. */
+export const SERVICES = ["pedagogical", "administrative"] as const;
+export type Service = (typeof SERVICES)[number];
+export const SERVICE_LABEL: Record<Service, string> = { pedagogical: "Pedagogical", administrative: "Administrative" };
+
+export const AVAILABILITIES = ["available", "busy", "away", "absent"] as const;
+export type Availability = (typeof AVAILABILITIES)[number];
+export const AVAILABILITY_LABEL: Record<Availability, string> = { available: "Available", busy: "Busy", away: "Away", absent: "Absent" };
+/** Status dots. Chosen per meaning, like the room statuses: they are data, not chrome. */
+export const AVAILABILITY_COLOR: Record<Availability, string> = { available: "#00a86b", busy: "#e5484d", away: "#f5a524", absent: "#8a9a92" };
+
 export interface StaffMember {
   id: string;
   email: string | null;
@@ -47,6 +58,8 @@ export interface StaffMember {
   groups: Group[];
   cardUid: string | null;
   department: string;
+  /** Faculty directory: set to appear on the Faculty screens. */
+  service: Service | null;
   jobTitle: string;
   phone: string;
   disabled: boolean;
@@ -202,6 +215,7 @@ export interface Announcement {
 export interface Asset {
   id: string;
   name: string;
+  kind: "audio" | "image" | "video";
   mime: string;
   size: number;
   sha256: string;
@@ -219,7 +233,7 @@ export interface DisplayConfig {
   layout: "standard" | "compact" | "split";
   theme: "dark" | "light";
   accentColor: string;
-  show: { roomName: boolean; building: boolean; floor: boolean; capacity: boolean; clock: boolean; announcements: boolean };
+  show: { roomName: boolean; building: boolean; floor: boolean; capacity: boolean; clock: boolean; announcements: boolean; nextReservation: boolean };
   sleep: TimeWindow;
 }
 
@@ -227,7 +241,7 @@ export const DEFAULT_DISPLAY_CONFIG: DisplayConfig = {
   layout: "standard",
   theme: "dark",
   accentColor: "#00a86b",
-  show: { roomName: true, building: true, floor: true, capacity: true, clock: true, announcements: true },
+  show: { roomName: true, building: true, floor: true, capacity: true, clock: true, announcements: true, nextReservation: true },
   sleep: { enabled: false, from: "22:00", to: "06:00" },
 };
 
@@ -278,6 +292,17 @@ export interface Emergency {
   startedAt: string;
   clearedBy: string | null;
   clearedAt: string | null;
+  endMessage: string | null;
+  endNoticeSeconds: number | null;
+  voice: { status: "none" | "sent" | "failed" | "unavailable"; error: string | null };
+}
+
+/** Answer of the first step of a real alert. */
+export interface EmergencyConfirmation {
+  confirmation: string;
+  expiresAt: string;
+  deviceCount: number;
+  title: string;
 }
 
 export interface EmergencyDelivery {
@@ -298,3 +323,172 @@ export interface RegistrationSession {
 
 /** Card serial numbers read as one hex string are easier to compare in pairs: 04 A2 2B 1C. */
 export const formatCardUid = (uid: string) => (uid.match(/.{1,2}/g) ?? []).join(" ");
+
+// ---- Voice, templates, schedules ---------------------------------------------------------------
+
+export interface Voice {
+  id: string;
+  label: string;
+  language: string;
+}
+
+export interface VoiceCatalogue {
+  enabled: boolean;
+  maxChars: number;
+  voices: Voice[];
+  /** Voice that reads emergencies aloud. */
+  emergencyVoice: string | null;
+}
+
+/** "fr" -> "French", in the browser's language. */
+export const languageName = (code: string) => new Intl.DisplayNames(undefined, { type: "language" }).of(code) ?? code;
+
+export interface AnnouncementTemplate {
+  id: string;
+  name: string;
+  kind: "text" | "voice";
+  title: string;
+  text: string;
+  priority: AnnouncePriority;
+  voice: string;
+  createdBy: string;
+  updatedAt: string;
+}
+
+export type ScheduleTrigger =
+  | { type: "once"; at: string }
+  | { type: "daily"; time: string }
+  | { type: "weekly"; time: string; days: number[] }
+  | { type: "status"; status: string; roomId?: string };
+
+export interface Schedule {
+  id: string;
+  name: string;
+  content: { kind: "text" | "voice"; title: string; text: string; priority: AnnouncePriority; voice: string; expiresAfterMinutes?: number };
+  trigger: ScheduleTrigger;
+  targets: Targets | null;
+  enabled: boolean;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastError: string | null;
+  runCount: number;
+  createdBy: string;
+}
+
+export const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+
+export function describeTrigger(t: ScheduleTrigger, statusLabel: (key: string) => string = (k) => k): string {
+  if (t.type === "once") return `Once, ${new Date(t.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
+  if (t.type === "daily") return `Every day at ${t.time}`;
+  if (t.type === "weekly") return `${t.days.map((d) => WEEKDAYS[d]!.slice(0, 3)).join(", ")} at ${t.time}`;
+  return `When ${t.roomId ? "that room" : "a room"} becomes "${statusLabel(t.status)}"`;
+}
+
+// ---- Faculty and reservations ----------------------------------------------------------------
+
+export interface NewsItem {
+  id: string;
+  title: string;
+  text: string;
+  priority: AnnouncePriority;
+  publishedAt: string;
+  expiresAt: string | null;
+  expired: boolean;
+  createdBy: string;
+}
+
+export interface StaffAvailability {
+  id: string;
+  name: string;
+  jobTitle: string;
+  service: Service | null;
+  availability: Availability;
+  note: string;
+  until: string | null;
+  updatedAt: string | null;
+}
+
+export const FACULTY_SLIDES = ["news", "staff", "reservations"] as const;
+export type FacultySlide = (typeof FACULTY_SLIDES)[number];
+export const SLIDE_LABEL: Record<FacultySlide, string> = { news: "News", staff: "Staff availability", reservations: "Room reservations" };
+
+/** What a Faculty screen shows: the information board, the custom content, or both taking turns. */
+export const FACULTY_MODES = ["default", "custom", "mixed"] as const;
+export type FacultyMode = (typeof FACULTY_MODES)[number];
+export const MODE_LABEL: Record<FacultyMode, string> = {
+  default: "Information board",
+  custom: "Custom content only",
+  mixed: "Both, taking turns",
+};
+
+export interface AssetRef {
+  assetId: string;
+  sha256: string;
+  size: number;
+  mime: string;
+}
+
+export interface FacultySite {
+  name: string;
+  subtitle: string;
+  zone: string;
+  assemblyPoint: string;
+  emergencyNumber: string;
+  logo: AssetRef | null;
+}
+
+export interface FacultyConfig {
+  mode: FacultyMode;
+  site: FacultySite;
+  service: "all" | Service;
+  carousel: { enabled: boolean; intervalSeconds: number; slides: FacultySlide[] };
+  widgets: { clock: boolean; date: boolean; weather: boolean };
+  weather: { label: string; latitude: number; longitude: number } | null;
+}
+
+export interface FacultyDisplay {
+  id: string;
+  name: string;
+  online: boolean;
+  config: FacultyConfig;
+}
+
+export interface Reservation {
+  id: string;
+  roomId: string;
+  room: { code: string; name: string; building: string } | null;
+  title: string;
+  start: string;
+  end: string;
+  organizerId: string;
+  organizer: string;
+  status: "active" | "cancelled";
+}
+
+/** Value for an `<input type="datetime-local">` (local time, no zone) from a date. */
+export const toLocalInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+
+// ---- Custom content ------------------------------------------------------------------------------
+
+export const CONTENT_KINDS = ["image", "video", "text", "web"] as const;
+export type ContentKind = (typeof CONTENT_KINDS)[number];
+export const CONTENT_KIND_LABEL: Record<ContentKind, string> = { image: "Image", video: "Video", text: "Text", web: "Web page" };
+
+export interface ContentSlide {
+  id: string;
+  kind: ContentKind;
+  title: string;
+  text: string | null;
+  url: string | null;
+  refreshSeconds: number | null;
+  assetId: string | null;
+  durationSeconds: number;
+  fit: "contain" | "cover";
+  startsAt: string | null;
+  endsAt: string | null;
+  targets: Targets;
+  enabled: boolean;
+  state: "live" | "scheduled" | "over" | "paused";
+  displayCount: number;
+  createdBy: string;
+}

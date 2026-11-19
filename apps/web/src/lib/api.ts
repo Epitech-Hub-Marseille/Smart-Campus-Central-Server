@@ -48,3 +48,19 @@ export async function api<T>(path: string, init: Init = {}): Promise<T> {
   }
   return data as T;
 }
+
+/** POST JSON and read the answer as a binary file (pre-listening a generated voice). */
+export async function apiBlob(path: string, body: unknown): Promise<Blob> {
+  const res = await fetch(`/api${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) onUnauthorized?.();
+    throw new ApiError(res.status, data.error ?? res.statusText);
+  }
+  return res.blob();
+}

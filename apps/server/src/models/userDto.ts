@@ -7,6 +7,7 @@ export interface UserLike {
   groups: Group[];
   cardUid?: string | null;
   department?: string | null;
+  service?: string | null;
   jobTitle?: string | null;
   phone?: string | null;
   disabled: boolean;
@@ -23,6 +24,7 @@ export const userDto = (u: UserLike | UserDoc) => ({
   role: roleOf(u.groups as Group[]),
   cardUid: u.cardUid ?? null,
   department: u.department ?? "",
+  service: u.service ?? null,
   jobTitle: u.jobTitle ?? "",
   phone: u.phone ?? "",
   disabled: u.disabled,

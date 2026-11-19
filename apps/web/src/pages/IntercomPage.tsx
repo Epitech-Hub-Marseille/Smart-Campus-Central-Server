@@ -2,6 +2,7 @@ import { Radio, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AudioRecorder } from "@/components/AudioRecorder";
 import { ErrorText, Field } from "@/components/Field";
+import { VoiceAnnouncement } from "@/components/VoiceAnnouncement";
 import { PageHeader } from "@/components/PageHeader";
 import { emptyTargetState, TargetPicker, toTargets, type TargetState } from "@/components/TargetPicker";
 import { Badge } from "@/components/ui/badge";
@@ -33,9 +34,16 @@ export function IntercomPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="InterCom" description="Record or import a sound, then play it on the speakers of the screens you choose." />
+      <PageHeader title="InterCom" description="Record or import a sound, or type a text for a voice to read, then play it on the speakers of the screens you choose." />
 
       <NewSound onSaved={assets.reload} />
+
+      <VoiceAnnouncement
+        onSent={() => {
+          assets.reload();
+          broadcasts.reload();
+        }}
+      />
 
       <section className="flex flex-col gap-3">
         <h2 className="text-base font-semibold">Sound library</h2>

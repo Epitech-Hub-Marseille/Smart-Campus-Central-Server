@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMERGENCY_CATALOGUE, EMERGENCY_KINDS, MAX_FRAME_BYTES, buildMessage, displayConfig, handshakeMessages, isUlid, parseDeviceMessage, parseServerMessage, ulid } from "./index.js";
+import { CONTENT_LIMITS, FACULTY_LIMITS, facultyConfig, EMERGENCY_CATALOGUE, EMERGENCY_KINDS, MAX_FRAME_BYTES, buildMessage, displayConfig, handshakeMessages, isUlid, parseDeviceMessage, parseServerMessage, ulid } from "./index.js";
 
 describe("ulid", () => {
   it("is 26 Crockford chars and sortable by time", () => {
@@ -127,5 +127,127 @@ describe("display config", () => {
     expect(displayConfig.safeParse({ layout: "grid" }).success).toBe(false);
     expect(displayConfig.safeParse({ accentColor: "green" }).success).toBe(false);
     expect(displayConfig.safeParse({ sleep: { from: "25:00" } }).success).toBe(false);
+  });
+});
+
+describe("faculty and reservation messages", () => {
+  const longText = (n: number) => "é".repeat(n);
+
+  it("fills in the faculty config defaults", () => {
+    const config = facultyConfig.parse({});
+    expect(config).toMatchObject({ service: "all", carousel: { enabled: true, intervalSeconds: 15 }, widgets: { weather: false }, weather: null });
+    expect(config.carousel.slides).toEqual(["news", "staff", "reservations"]);
+  });
+
+  it("rejects a carousel that is too fast or has no slide, and a weather position off the globe", () => {
+    expect(facultyConfig.safeParse({ carousel: { intervalSeconds: 1 } }).success).toBe(false);
+    expect(facultyConfig.safeParse({ carousel: { slides: [] } }).success).toBe(false);
+    expect(facultyConfig.safeParse({ weather: { latitude: 91, longitude: 0 } }).success).toBe(false);
+  });
+
+  it("a snapshot at every limit still fits in a frame, even with multi-byte text and after encryption overhead", () => {
+    const now = Date.now();
+    const payload = {
+      news: Array.from({ length: FACULTY_LIMITS.news }, (_, i) => ({
+        id: ulid(), title: longText(120), text: longText(400), priority: "info" as const, publishedAt: now + i, expiresAt: now,
+      })),
+      staff: Array.from({ length: FACULTY_LIMITS.staff }, () => ({
+        id: ulid(), name: longText(80), service: "pedagogical" as const, jobTitle: longText(60), availability: "busy" as const, note: longText(60), until: now,
+      })),
+      reservations: Array.from({ length: FACULTY_LIMITS.reservations }, () => ({
+        id: ulid(), room: longText(60), title: longText(100), start: now, end: now, organizer: longText(60),
+      })),
+      updatedAt: now,
+    };
+    const frame = JSON.stringify(buildMessage({ type: "faculty.content.set", payload }, 1));
+    expect(parseServerMessage(frame).ok).toBe(true);
+    // 4/3 for base64 of the ciphertext, plus the envelope around it.
+    expect(Math.ceil(Buffer.byteLength(frame) * (4 / 3)) + 512).toBeLessThan(MAX_FRAME_BYTES);
+  });
+
+  it("refuses a snapshot above the limits", () => {
+    const tooMany = { news: [], staff: [], reservations: Array.from({ length: FACULTY_LIMITS.reservations + 1 }, () => ({ id: "r", room: "A", title: "t", start: 1, end: 2 })), updatedAt: 1 };
+    expect(parseServerMessage(JSON.stringify(buildMessage({ type: "faculty.content.set", payload: tooMany }, 1))).ok).toBe(false);
+  });
+
+  it("keeps emergency.clear without a message valid and bounds the message", () => {
+    const base = { emergencyId: "e1" };
+    expect(parseServerMessage(JSON.stringify(buildMessage({ type: "emergency.clear", payload: base }, 1))).ok).toBe(true);
+    expect(parseServerMessage(JSON.stringify(buildMessage({ type: "emergency.clear", payload: { ...base, message: "All clear." } }, 1))).ok).toBe(true);
+    expect(parseServerMessage(JSON.stringify(buildMessage({ type: "emergency.clear", payload: { ...base, message: "x".repeat(401) } }, 1))).ok).toBe(false);
+  });
+
+  it("bounds how long the end notice stays on screen", () => {
+    const clear = (noticeSeconds: number) => parseServerMessage(JSON.stringify(buildMessage({ type: "emergency.clear", payload: { emergencyId: "e1", message: "Over.", noticeSeconds } }, 1))).ok;
+    expect([clear(10), clear(900), clear(300)]).toEqual([true, true, true]);
+    expect([clear(9), clear(901), clear(12.5)]).toEqual([false, false, false]);
+  });
+
+  it("audio.play is not urgent by default", () => {
+    const frame = JSON.stringify(buildMessage({ type: "audio.play", payload: { announcementId: "n", assetId: "a", sha256: "a".repeat(64), size: 1 } as never }, 1));
+    const parsed = parseServerMessage(frame);
+    expect(parsed.ok && parsed.message.type === "audio.play" && parsed.message.payload.urgent).toBe(false);
+  });
+
+  it("a display config saved before reservations existed still validates and shows the next reservation", () => {
+    expect(displayConfig.parse({ show: { roomName: false } }).show).toMatchObject({ roomName: false, nextReservation: true });
+  });
+
+  it("limits a door's reservation list to five", () => {
+    const items = (n: number) => Array.from({ length: n }, () => ({ id: "r", title: "t", start: 1, end: 2 }));
+    expect(parseServerMessage(JSON.stringify(buildMessage({ type: "reservations.set", payload: { roomId: "x", items: items(5) } }, 1))).ok).toBe(true);
+    expect(parseServerMessage(JSON.stringify(buildMessage({ type: "reservations.set", payload: { roomId: "x", items: items(6) } }, 1))).ok).toBe(false);
+  });
+});
+
+describe("custom content", () => {
+  const sha = "a".repeat(64);
+  const asset = (mime: string) => ({ assetId: "asset1", sha256: sha, size: 1000, mime });
+  const parse = (item: object) => parseServerMessage(JSON.stringify(buildMessage({ type: "content.set", payload: { items: [item], updatedAt: 1 } } as never, 1)));
+
+  it("accepts each kind with what it needs and fills in the defaults", () => {
+    expect(parse({ id: "1", kind: "image", asset: asset("image/png") }).ok).toBe(true);
+    expect(parse({ id: "2", kind: "video", asset: asset("video/mp4"), durationSeconds: 60, fit: "cover" }).ok).toBe(true);
+    expect(parse({ id: "3", kind: "text", text: "Open day on Saturday" }).ok).toBe(true);
+    expect(parse({ id: "4", kind: "web", url: "https://example.org/live", refreshSeconds: 60 }).ok).toBe(true);
+    const parsed = parse({ id: "1", kind: "image", asset: asset("image/png") });
+    expect(parsed.ok && parsed.message.type === "content.set" && parsed.message.payload.items[0]).toMatchObject({ durationSeconds: 15, fit: "contain", title: "" });
+  });
+
+  it("refuses a slide that lacks what its kind needs, or that carries the wrong kind of file", () => {
+    expect(parse({ id: "1", kind: "image" }).ok).toBe(false);
+    expect(parse({ id: "1", kind: "image", asset: asset("video/mp4") }).ok).toBe(false);
+    expect(parse({ id: "1", kind: "video", asset: asset("image/png") }).ok).toBe(false);
+    expect(parse({ id: "1", kind: "text" }).ok).toBe(false);
+    expect(parse({ id: "1", kind: "web" }).ok).toBe(false);
+  });
+
+  it("refuses addresses that are not http(s), a bad hash, silly durations and a window that ends before it starts", () => {
+    expect(parse({ id: "1", kind: "web", url: "javascript:alert(1)" }).ok).toBe(false);
+    expect(parse({ id: "1", kind: "web", url: "file:///etc/passwd" }).ok).toBe(false);
+    expect(parse({ id: "1", kind: "image", asset: { ...asset("image/png"), sha256: "xyz" } }).ok).toBe(false);
+    expect(parse({ id: "1", kind: "text", text: "x", durationSeconds: 1 }).ok).toBe(false);
+    expect(parse({ id: "1", kind: "text", text: "x", durationSeconds: 601 }).ok).toBe(false);
+    expect(parse({ id: "1", kind: "text", text: "x", startsAt: 2000, endsAt: 1000 }).ok).toBe(false);
+  });
+
+  it("a full playlist of the longest items still fits a frame", () => {
+    const longText = "é".repeat(CONTENT_LIMITS.text);
+    const items = Array.from({ length: CONTENT_LIMITS.items }, (_, i) =>
+      i % 2 ? { id: ulid(), kind: "text" as const, title: "é".repeat(CONTENT_LIMITS.title), text: longText, startsAt: 1, endsAt: 2 } : { id: ulid(), kind: "web" as const, title: "é".repeat(CONTENT_LIMITS.title), url: `https://example.org/${"a".repeat(CONTENT_LIMITS.url - 21)}`, refreshSeconds: 60 },
+    );
+    const frame = JSON.stringify(buildMessage({ type: "content.set", payload: { items, updatedAt: Date.now() } }, 1));
+    expect(parseServerMessage(frame).ok).toBe(true);
+    expect(Buffer.byteLength(frame) + 512).toBeLessThan(MAX_FRAME_BYTES);
+    const tooMany = [...items, items[0]!];
+    expect(parseServerMessage(JSON.stringify(buildMessage({ type: "content.set", payload: { items: tooMany, updatedAt: 1 } } as never, 1))).ok).toBe(false);
+  });
+
+  it("the faculty config carries a mode and the details of the site, with safe defaults", () => {
+    const config = facultyConfig.parse({});
+    expect(config).toMatchObject({ mode: "default", site: { name: "", subtitle: "", zone: "", assemblyPoint: "", emergencyNumber: "", logo: null } });
+    expect(facultyConfig.parse({ mode: "mixed", site: { name: "Faculty of Engineering", logo: asset("image/png") } }).site.logo?.assetId).toBe("asset1");
+    expect(facultyConfig.safeParse({ mode: "slideshow" }).success).toBe(false);
+    expect(facultyConfig.safeParse({ site: { logo: { ...asset("image/png"), sha256: "bad" } } }).success).toBe(false);
   });
 });

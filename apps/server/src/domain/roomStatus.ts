@@ -8,6 +8,8 @@ import { RoomStatusChangeModel } from "../models/roomStatusChange.js";
 import { RoomModel } from "../models/room.js";
 import type { PublicUser } from "../models/user.js";
 import { enqueueCommand } from "./commands.js";
+import { pushReservationsToDevice } from "./reservations.js";
+import { fireStatusSchedules } from "./schedules.js";
 
 type Actor = Pick<PublicUser, "id" | "name">;
 
@@ -52,6 +54,7 @@ export async function pushRoomToDevice(deviceId: string, roomId: string): Promis
     capacity: room.capacity ?? null,
   });
   if (status) await enqueueCommand(deviceId, "room.status.set", statusPayload(roomId, status, room.statusSince));
+  await pushReservationsToDevice(deviceId, roomId);
 }
 
 export async function pushRoomToItsDevices(roomId: string): Promise<void> {
@@ -88,6 +91,8 @@ export async function setRoomStatus(roomId: string, key: string, actor: Actor) {
   }
   consoleBus.emit("room.status.changed", { roomId, status: key });
   await recordAudit(actor, "room.status.set", { type: "room", id: roomId }, { from, to: key });
+  // Automatic announcements waiting for this status. Their failure must never undo the status change.
+  await fireStatusSchedules(roomId, key).catch((err) => console.error("status schedules failed", err instanceof Error ? err.message : err));
   return room;
 }
 

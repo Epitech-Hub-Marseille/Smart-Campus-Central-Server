@@ -31,6 +31,14 @@ const emergencySchema = new Schema(
     startedByName: { type: String, required: true },
     clearedByName: { type: String },
     clearedAt: { type: Date },
+    // Shown on the screens after the alarm stops ("all clear, you may return").
+    endMessage: { type: String },
+    // How long the screens show it, in seconds.
+    endNoticeSeconds: { type: Number },
+    // Spoken version of the alert and of the end message. "none": not asked. "unavailable": asked but no
+    // voice engine is configured. The visual alert and the alarm never wait for it or depend on it.
+    voiceStatus: { type: String, enum: ["none", "sent", "failed", "unavailable"], default: "none" },
+    voiceError: { type: String },
   },
   { timestamps: true },
 );
