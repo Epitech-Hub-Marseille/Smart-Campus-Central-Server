@@ -28,6 +28,9 @@ import { RoomModel } from "../models/room.js";
  */
 export const enrollRouter = Router();
 
+// Two limits, because the two calls are not alike. Asking to be enrolled writes a record, so it is scarce. Asking how
+// the request went is a cheap read that a waiting device repeats every few seconds until an admin answers: counting it
+// against the scarce limit locked a device out after a minute, long before anyone could approve it.
 const enrollLimiter = rateLimit({
   windowMs: 15 * 60_000,
   limit: config.ENROLL_RATE_LIMIT,
@@ -35,9 +38,15 @@ const enrollLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many enrollment attempts, try again later" },
 });
-enrollRouter.use(enrollLimiter);
+const statusLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: config.ENROLL_STATUS_RATE_LIMIT,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "Too many status checks, try again shortly" },
+});
 
-enrollRouter.post("/", async (req, res) => {
+enrollRouter.post("/", enrollLimiter, async (req, res) => {
   const input = z
     .object({
       publicKey: z.string().min(80).max(400),
@@ -49,7 +58,7 @@ enrollRouter.post("/", async (req, res) => {
   res.status(201).json(request);
 });
 
-enrollRouter.get("/:deviceId", async (req, res) => {
+enrollRouter.get("/:deviceId", statusLimiter, async (req, res) => {
   res.json({ status: await enrollmentStatus(String(req.params.deviceId)) });
 });
 
