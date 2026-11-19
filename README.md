@@ -45,7 +45,7 @@ The single `pnpm-lock.yaml` at the root is committed.
 | Two-factor authentication | Authenticator-app codes (TOTP, RFC 6238). Administrators must set it up before the console lets them do anything else; everyone else may. Ten single-use recovery codes, a lockout after five wrong codes, and a reset by another administrator. Every emergency alert, test or real, asks for a fresh code. |
 | Themes | A theme is JSON tokens (colours, a font family from a fixed list, a text scale, a corner radius) that door units and Faculty screens both apply, plus optional CSS for the Faculty screens. Set for all of a kind, a group or one device; the most specific wins. |
 | API keys | Keys for other applications to use the official API, each with only the scopes it needs, a required end date (at most one year), instant revocation and a usage log. Created by administrators with a fresh authenticator code, shown once, stored hashed. |
-| Emergency alerts | Fire, biohazard, radiation leak, bomb threat, earthquake and power cut. Takes over the door screens (door code, chevrons towards the emblem, procedure) and loops a synthesised alarm until ended. Test mode shows a TEST tag and plays at a chosen volume. Kept in the digital twin, so an offline screen sounds the alarm when it reconnects and stops if the alert ended meanwhile. A real alert needs two steps enforced by the API, can also be read aloud, and ends with a message shown on the screens (see [Emergency alerts](#emergency-alerts)) |
+| Emergency alerts | Fire, biohazard, radiation leak, bomb threat, earthquake and power cut. Takes over the door screens and the Faculty screens with a terminal-style bulletin (the alert in yellow on the dark colour of its kind, the order to follow, numbered steps, hazard stripes) and loops a synthesised alarm until ended. Test mode shows a TEST tag and plays at a chosen volume. Kept in the digital twin, so an offline screen sounds the alarm when it reconnects and stops if the alert ended meanwhile. A real alert needs two steps enforced by the API, can also be read aloud, and ends with a message shown on the screens (see [Emergency alerts](#emergency-alerts)) |
 | InterCom | Record or import a sound (stored in GridFS, WAV/MP3/Ogg/WebM/M4A, `MAX_AUDIO_MB`), broadcast it to chosen devices. Devices download it over a request signed with their key. Volume and quiet hours per device. **Voice announcements**: type a text, choose a language and a voice, listen to it, then broadcast it (see [Voice and schedules](#voice-announcements-schedules-and-templates)) |
 | Schedules and templates | Announcements that send themselves once, daily, weekly, or when a room changes status; a library of reusable announcement texts |
 | Faculty screens | The information board of the reference design (events of the day, booked rooms, announcements, a news ticker) plus staff availability (updated by the staff themselves, filtered by service), with carousel, clock, date and weather widgets. The screen application is in its own repository, `SmartCampus-FacultyScreens` |
@@ -74,6 +74,12 @@ decision, so the shipped implementation speaks the OpenAI `POST /audio/speech` A
   If the container falls back to CPU or fails on an older GPU, see its logs: the image's CUDA build must support your card.
 - The text is limited to 1000 characters and synthesis is rate-limited per person (20 a minute). The reply must really be audio (sniffed)
   and not larger than `MAX_AUDIO_MB`. The engine's error text is never passed to the console.
+- **Chimes.** A voice can start with a chime that tells how serious the announcement is (`chime`: `info`, `important` or `urgent`, in the InterCom form
+  and in scheduled voice content). They were designed from two reference recordings and get louder with the severity: *info* is a soft double ding
+  (F#4 with its odd harmonics, struck twice, about -12 dBFS), *important* is two bells rising, a deep one then a bright one (about -7 dBFS), *urgent*
+  is the bright bell struck three times (about -3 dBFS). They are generated in `lib/chimes.ts` (nothing stored) and joined to the voice on the server, so
+  the devices play one file and need no change. To join them without a decoder the server asks the engine for `wav`; an engine that does not return a
+  16-bit PCM WAV gets its voice sent as it is, with a warning in the log. `GET /api/intercom/chimes/:level` returns a chime alone to pre-listen to.
 
 **Schedules** (`/schedules`, admins and operators). A schedule announces a text (on screens) or a voice, at a time or on an event:
 
@@ -289,7 +295,15 @@ corner radius from 0 to 32. Whatever a theme leaves out keeps the app's own look
   unpacking, nothing written to disk), a font already in the library with the same bytes is reused, and the console has an Import ZIP button.
 - **CSS is checked** by the server and again by the device: at most 12,000 characters, no `url()`, `@import`, `@font-face`, `expression()`,
   `javascript:` or escape sequences, balanced braces, nothing that could close its own `<style>`. Nothing can be loaded from elsewhere.
-- **Emergency alerts and the end-of-alert notice are never themed.** A Faculty screen removes the theme's CSS while one is showing.
+- **Emergency alerts keep their identity.** An alert is a terminal-style bulletin (bold monospace, white double frame, yellow on the dark colour of its
+  kind, a numbered list of steps, hazard stripes) on the door units and the Faculty screens. Its wording, its alarm and its white and yellow text are
+  never themed, and a Faculty screen removes the theme's CSS, colours and text size while an alert or the end-of-alert notice shows. A theme may only
+  dress it through a small, closed `emergency` section (not CSS): `fonts` (use the theme's font files), `frame` (`stripes`, the default, or a plain
+  yellow `bar`), `radius` (corners, 0 to 32) and `colors.background` / `colors.card` (the page, and the panel behind the steps on Faculty screens).
+  A colour must keep white text readable: a contrast of at least 4.5:1 (WCAG, large text), refused by the server otherwise. **Fallback to the default
+  alert:** a device that cannot read the section, finds a colour too light, or cannot draw the themed alert (a Faculty screen catches a render error)
+  shows the default alert, and a font that fails to load falls back to the default fonts. The rest of the theme is kept. A theme with no `emergency`
+  section sends nothing about alerts.
 - **Which theme applies.** `PUT /api/themes/assignments {scope, key, themeId|null}` with scope `device`, `group` (a device group) or `default` (key `door`
   or `display`). A device wears, in this order, its own theme, the theme of its group (the first in alphabetical order if it is in several), the
   default for its kind, or nothing. `GET /api/themes/resolve/:deviceId` says which and why.
