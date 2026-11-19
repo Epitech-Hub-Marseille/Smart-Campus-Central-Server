@@ -42,9 +42,15 @@ export function VoicePicker({ catalogue, language, voice, onChange, idPrefix }: 
   );
 }
 
-export type Chime = "" | "info" | "important" | "urgent";
+export type Chime = "" | "info" | "important" | "urgent" | "override" | "important-override";
 
-const CHIME_LABEL: Record<Exclude<Chime, "">, string> = { info: "Info: a soft double ding", important: "Important: two bells, low then bright", urgent: "Urgent: the bright bell struck three times" };
+const CHIME_LABEL: Record<Exclude<Chime, "">, string> = {
+  info: "Info: two soft blips, rising",
+  important: "Important: a held two-tone \"da-da\"",
+  urgent: "Urgent: a bright stab and a harsh buzz",
+  override: "Manual override: two clean beeps",
+  "important-override": "Important manual override: a busy figure of bells",
+};
 
 /** The chime played before a voice, by severity, with a button to hear it. Louder means more serious. */
 export function ChimePicker({ value, onChange, idPrefix }: { value: Chime; onChange: (next: Chime) => void; idPrefix: string }) {
