@@ -1,17 +1,10 @@
-import { FACULTY_LIMITS, facultyConfig, type FacultyConfig, type PayloadOf, type Service } from "@smartcampus/protocol";
-import { recordAudit } from "../lib/audit.js";
-import { HttpError } from "../lib/errors.js";
+import { FACULTY_LIMITS, type FacultyConfig, type PayloadOf, type Service } from "@smartcampus/protocol";
 import { DeviceModel } from "../models/device.js";
 import { NewsModel } from "../models/news.js";
 import { ReservationModel } from "../models/reservation.js";
 import { UserModel } from "../models/user.js";
-import type { PublicUser } from "../models/user.js";
-import { AssetModel } from "../models/asset.js";
-import { assetRefOf } from "./assets.js";
 import { enqueueCommand } from "./commands.js";
-import { notifyContentChanged, pushContent } from "./content.js";
-
-type Actor = Pick<PublicUser, "id" | "name">;
+import { pushCarousel, pushScreenConfig, resolveScreens } from "./screens.js";
 
 /** A snapshot is rebuilt whenever something changes and on every connection, so a day without news is the longest it must outlive. */
 const CONTENT_TTL_SECONDS = 86_400;
@@ -87,70 +80,44 @@ export function effectiveAvailability(
   };
 }
 
-const activeDisplays = () => DeviceModel.find({ type: "display", status: "active" }, { deviceId: 1, desired: 1 });
-
-const configOf = (desired: unknown): FacultyConfig => {
-  const stored = (desired as { facultyConfig?: unknown } | undefined)?.facultyConfig;
-  const parsed = facultyConfig.safeParse(stored ?? {});
-  return parsed.success ? parsed.data : facultyConfig.parse({});
-};
-
-/** Current look of a display (defaults when it never had one). */
-export async function currentFacultyConfig(deviceId: string): Promise<FacultyConfig> {
-  const device = await DeviceModel.findOne({ deviceId }, { desired: 1 });
-  return configOf(device?.desired);
-}
-
 /**
  * Sends the current content to Faculty screens (all of them, or the given ones). The snapshot is
  * built once per service filter. It is not stored in the digital twin: it is derived data and too big
  * for `session.ready`, so it is rebuilt when the screen connects instead (`refreshFacultyOnConnect`).
  */
 export async function pushFacultyContent(deviceIds?: string[]): Promise<number> {
-  const displays = (await activeDisplays()).filter((d) => !deviceIds || deviceIds.includes(d.deviceId));
+  const screens = await resolveScreens(deviceIds);
   const cache = new Map<string, FacultyContent>();
   const now = new Date();
-  for (const d of displays) {
-    const service = configOf(d.desired).service;
+  for (const s of screens) {
+    const service = s.config.service;
     if (!cache.has(service)) cache.set(service, await buildFacultyContent(service, now));
-    await enqueueCommand(d.deviceId, "faculty.content.set", cache.get(service), CONTENT_TTL_SECONDS);
+    await enqueueCommand(s.deviceId, "faculty.content.set", cache.get(service), CONTENT_TTL_SECONDS);
   }
-  return displays.length;
+  return screens.length;
+}
+
+/** Look, carousel and board content of the given screens (all when none is named): what a settings or playlist change needs. */
+export async function applyScreenChange(deviceIds?: string[]): Promise<void> {
+  await pushScreenConfig(deviceIds);
+  // The service filter may have changed, so the staff list changes with it.
+  await pushFacultyContent(deviceIds);
+  await pushCarousel(deviceIds);
 }
 
 /** Content changed somewhere (news, availability, reservation, directory): tell the screens, never fail the caller. */
 export async function notifyFacultyChanged(): Promise<void> {
   try {
     await pushFacultyContent();
-    // A slide may have ended or begun since the last push.
-    await notifyContentChanged();
+    // A scene may have ended or begun since the last push.
+    await pushCarousel();
   } catch (err) {
     console.error("faculty push failed", err instanceof Error ? err.message : err);
   }
 }
 
-/** Before the connection replays its commands: a Faculty screen that reconnects gets fresh content. */
+/** Before the connection replays its commands: a Faculty screen that reconnects gets its look and fresh content. */
 export async function refreshFacultyOnConnect(deviceId: string): Promise<void> {
   const device = await DeviceModel.findOne({ deviceId, type: "display", status: "active" }, { _id: 1 });
-  if (device) {
-    await pushFacultyContent([deviceId]);
-    await pushContent([deviceId]);
-  }
-}
-
-export async function setFacultyConfig(deviceId: string, config: FacultyConfig, actor: Actor): Promise<void> {
-  const device = await DeviceModel.findOne({ deviceId, status: "active" }, { type: 1 });
-  if (!device) throw new HttpError(404, "Active device not found");
-  if (device.type !== "display") throw new HttpError(400, "Only Faculty displays have a Faculty configuration");
-  // The logo is a file of the library: its hash and size come from the stored record, never from the request.
-  if (config.site.logo) {
-    const logo = await AssetModel.findOne({ assetId: config.site.logo.assetId, kind: "image" });
-    if (!logo) throw new HttpError(400, "The logo must be an image from the library");
-    config = { ...config, site: { ...config.site, logo: assetRefOf(logo) } };
-  }
-  await enqueueCommand(deviceId, "faculty.config.set", { config });
-  // The service filter may have changed, so the staff list changes with it, and the mode decides whether a playlist is sent.
-  await pushFacultyContent([deviceId]);
-  await pushContent([deviceId]);
-  await recordAudit(actor, "faculty.config.set", { type: "device", id: deviceId }, { service: config.service, slides: config.carousel.slides.length });
+  if (device) await applyScreenChange([deviceId]);
 }

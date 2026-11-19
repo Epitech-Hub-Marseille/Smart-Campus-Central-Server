@@ -13,6 +13,8 @@ const assetSchema = new Schema(
     size: { type: Number, required: true },
     sha256: { type: String, required: true },
     gridFsId: { type: Schema.Types.ObjectId, required: true },
+    // One level of folders for the media library ("" is the root), so a large library stays browsable.
+    folder: { type: String, trim: true, default: "" },
     createdByName: { type: String, required: true },
   },
   { timestamps: true },
@@ -27,6 +29,8 @@ export const assetDto = (a: InstanceType<typeof AssetModel>) => ({
   mime: a.mime,
   size: a.size,
   sha256: a.sha256,
+  folder: a.folder ?? "",
   createdBy: a.createdByName,
   createdAt: a.createdAt,
+  updatedAt: a.updatedAt,
 });

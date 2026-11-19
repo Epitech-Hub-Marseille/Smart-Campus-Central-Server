@@ -152,11 +152,14 @@ describe("Faculty screens", () => {
     await dev.next("session.ready");
     // The content is rebuilt when the screen connects.
     expect((await dev.next("faculty.content.set")).payload.staff.map((s) => s.name)).toEqual(["Alice Martin"]);
+    // And its look and carousel, which have nothing configured yet.
+    expect((await dev.next("faculty.config.set")).payload.config.widgets.weather).toBe(false);
+    await dev.next("carousel.set");
 
-    const config = { service: "all", carousel: { intervalSeconds: 20, slides: ["news", "staff"] }, widgets: { clock: true, date: true, weather: true }, weather: { label: "Marseille", latitude: 43.3, longitude: 5.4 } };
-    expect((await operator.request("PUT", `/faculty/displays/${deviceId}/config`, config)).status).toBe(200);
+    const config = { service: "all", widgets: { clock: true, date: true, weather: true }, weather: { label: "Marseille", latitude: 43.3, longitude: 5.4 } };
+    expect((await operator.request("PUT", `/faculty/scopes/device/${deviceId}/config`, config)).status).toBe(204);
     const configured = await dev.next("faculty.config.set");
-    expect(configured.payload.config).toMatchObject({ carousel: { enabled: true, intervalSeconds: 20, slides: ["news", "staff"] }, weather: { label: "Marseille" } });
+    expect(configured.payload.config).toMatchObject({ carousel: { enabled: true }, widgets: { weather: true }, weather: { label: "Marseille" } });
     await dev.next("faculty.content.set");
 
     await operator.request("POST", "/faculty/news", { title: "Library closed Friday", priority: "important" });
@@ -173,7 +176,7 @@ describe("Faculty screens", () => {
     const { identity, deviceId } = await h.enrollDevice({ type: "display" });
     await addPerson("Alice Martin", "pedagogical");
     await addPerson("Bruno Petit", "administrative");
-    await operator.request("PUT", `/faculty/displays/${deviceId}/config`, { service: "administrative" });
+    await operator.request("PUT", `/faculty/scopes/device/${deviceId}/config`, { service: "administrative" });
 
     const dev = h.connectDevice(deviceId, identity);
     await dev.ready;
@@ -209,22 +212,12 @@ describe("Faculty screens", () => {
   it("only a Faculty display has a Faculty configuration, and the configuration is validated", async () => {
     const door = await h.enrollDevice({ type: "door" });
     const display = await h.enrollDevice({ type: "display" });
-    expect((await operator.request("PUT", `/faculty/displays/${door.deviceId}/config`, {})).status).toBe(400);
-    expect((await operator.request("PUT", "/faculty/displays/nope/config", {})).status).toBe(404);
-    for (const bad of [{ carousel: { intervalSeconds: 2 } }, { carousel: { slides: [] } }, { service: "cleaning" }, { weather: { latitude: 200, longitude: 0 } }]) {
-      expect((await operator.request("PUT", `/faculty/displays/${display.deviceId}/config`, bad)).status).toBe(400);
+    expect((await operator.request("PUT", `/faculty/scopes/device/${door.deviceId}/config`, {})).status).toBe(404);
+    expect((await operator.request("PUT", "/faculty/scopes/device/nope/config", {})).status).toBe(404);
+    for (const bad of [{ mode: "custom" }, { carousel: { slides: ["news"] } }, { service: "cleaning" }, { weather: { label: "", latitude: 200, longitude: 0 } }]) {
+      expect((await operator.request("PUT", `/faculty/scopes/device/${display.deviceId}/config`, bad)).status).toBe(400);
     }
-    expect((await staff.request("PUT", `/faculty/displays/${display.deviceId}/config`, {})).status).toBe(403);
-  });
-
-  it("lists the displays with their current configuration for the console", async () => {
-    const display = await h.enrollDevice({ type: "display" });
-    await h.enrollDevice({ type: "door" });
-    await operator.request("PUT", `/faculty/displays/${display.deviceId}/config`, { service: "pedagogical" });
-    const { body } = await operator.request("GET", "/faculty/displays");
-    expect(body.items).toHaveLength(1);
-    expect(body.items[0]).toMatchObject({ id: display.deviceId, online: false, config: { service: "pedagogical", carousel: { intervalSeconds: 15 } } });
-    expect((await staff.request("GET", "/faculty/displays")).status).toBe(403);
+    expect((await staff.request("PUT", `/faculty/scopes/device/${display.deviceId}/config`, {})).status).toBe(403);
   });
 
   it("changing a person's service or disabling them updates the screens", async () => {

@@ -1,8 +1,27 @@
-import { AVAILABILITIES, FACULTY_LIMITS, ANNOUNCE_PRIORITIES, SERVICES, facultyConfig, ulid } from "@smartcampus/protocol";
+import { AVAILABILITIES, FACULTY_LIMITS, ANNOUNCE_PRIORITIES, SCENE_LAYOUTS, SERVICES, TILE_KINDS, TILE_LIMITS, facultyConfig, facultyConfigPatch, mergeConfigPatches, ulid } from "@smartcampus/protocol";
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../auth/middleware.js";
-import { buildFacultyContent, currentFacultyConfig, effectiveAvailability, notifyFacultyChanged, setFacultyConfig } from "../domain/faculty.js";
+import { applyScreenChange, buildFacultyContent, effectiveAvailability, notifyFacultyChanged } from "../domain/faculty.js";
+import {
+  BUILTIN_SCENES,
+  DEFAULT_SCOPE,
+  clearScopeConfig,
+  clearScopePlaylist,
+  createGroup,
+  deleteGroup,
+  describeScope,
+  effectivePlaylist,
+  groupInput,
+  layersOf,
+  loadContext,
+  mergedPatch,
+  setScopeConfig,
+  setScopePlaylist,
+  updateGroup,
+  type ScopeRef,
+} from "../domain/screens.js";
+import { SCREEN_SCOPES } from "../models/screenLayer.js";
 import { recordAudit } from "../lib/audit.js";
 import { HttpError } from "../lib/errors.js";
 import { objectId } from "../lib/http.js";
@@ -142,22 +161,111 @@ facultyRouter.put("/availability/:userId", canWrite, async (req, res) => {
   res.json(result);
 });
 
-// ---- Screens ------------------------------------------------------------------------------
+// ---- Screens, groups and what they show ------------------------------------------------------
 
-facultyRouter.get("/displays", canWrite, async (_req, res) => {
-  const displays = await DeviceModel.find({ type: "display", status: "active" }).sort({ name: 1 });
+/** What the console needs to draw the carousel editor: the layouts and the kinds of tile, as data. */
+facultyRouter.get("/tile-kinds", canWrite, (_req, res) => {
+  res.json({ kinds: TILE_KINDS, layouts: SCENE_LAYOUTS, limits: TILE_LIMITS, defaults: facultyConfig.parse({}) });
+});
+
+/** The screens, the groups they are in and whether each level has its own settings or playlist. */
+facultyRouter.get("/screens", canWrite, async (_req, res) => {
+  const [displays, ctx] = await Promise.all([DeviceModel.find({ type: "display", status: "active" }).sort({ name: 1 }), loadContext()]);
+  const has = (scope: string, key: string) => {
+    const layer = ctx.layers.get(`${scope}:${key}`);
+    return { config: Object.keys(layer?.config ?? {}).length > 0, playlist: Boolean(layer?.scenes) };
+  };
   res.json({
-    items: await Promise.all(
-      displays.map(async (d) => ({ id: d.deviceId, name: d.name || d.deviceId, online: registry.isOnline(d.deviceId), config: await currentFacultyConfig(d.deviceId) })),
-    ),
+    default: has("default", "-"),
+    groups: ctx.groups.map((g) => ({ ...g, ...{ own: has("group", g.id) } })),
+    displays: displays.map((d) => {
+      const group = ctx.groups.find((g) => g.members.includes(d.deviceId));
+      return { id: d.deviceId, name: d.name || d.deviceId, online: registry.isOnline(d.deviceId), groupId: group?.id ?? null, own: has("device", d.deviceId) };
+    }),
   });
 });
 
-facultyRouter.put("/displays/:id/config", canWrite, async (req, res) => {
-  const config = facultyConfig.parse(req.body);
-  await setFacultyConfig(String(req.params.id), config, req.user!);
-  // The stored version: the logo reference is rebuilt from the library.
-  res.json(await currentFacultyConfig(String(req.params.id)));
+facultyRouter.post("/groups", canWrite, async (req, res) => {
+  const { group, affected } = await createGroup(groupInput.parse(req.body), req.user!);
+  await applyScreenChange(affected);
+  res.status(201).json({ id: group.groupId, name: group.name, description: group.description, members: group.members });
+});
+
+facultyRouter.put("/groups/:id", canWrite, async (req, res) => {
+  const { group, affected } = await updateGroup(String(req.params.id), groupInput.parse(req.body), req.user!);
+  await applyScreenChange(affected);
+  res.json({ id: group.groupId, name: group.name, description: group.description, members: group.members });
+});
+
+facultyRouter.delete("/groups/:id", canWrite, async (req, res) => {
+  const members = await deleteGroup(String(req.params.id), req.user!);
+  await applyScreenChange(members);
+  res.status(204).end();
+});
+
+const scopeOf = (req: { params: Record<string, string | string[] | undefined> }): ScopeRef => {
+  const scope = z.enum(SCREEN_SCOPES).parse(req.params.scope);
+  const key = z.string().min(1).max(64).parse(req.params.key);
+  return scope === "default" ? DEFAULT_SCOPE : { scope, key };
+};
+
+/**
+ * One level of the hierarchy, with what it inherits from the levels above, so the console can show a field as
+ * "inherited" or "set here". The key of the default level is "-".
+ */
+facultyRouter.get("/scopes/:scope/:key", canWrite, async (req, res) => {
+  const ref = scopeOf(req);
+  const where = await describeScope(ref);
+  const ctx = await loadContext();
+  const own = ctx.layers.get(`${ref.scope}:${ref.key}`) ?? { config: {}, scenes: null };
+
+  // The levels above this one: for a group, the default; for a screen, its group (if any) then the default.
+  const device = ref.scope === "device" ? layersOf(ctx, ref.key) : null;
+  const above =
+    ref.scope === "default"
+      ? { config: [] as Record<string, unknown>[], scenes: [] as { from: "group" | "default"; scenes: unknown }[] }
+      : ref.scope === "group"
+        ? { config: [ctx.layers.get("default:-")?.config ?? {}], scenes: [{ from: "default" as const, scenes: ctx.layers.get("default:-")?.scenes ?? null }] }
+        : { config: [device!.default.config, device!.group?.config ?? {}], scenes: [{ from: "group" as const, scenes: device!.group?.scenes ?? null }, { from: "default" as const, scenes: device!.default.scenes }] };
+  const inheritedScenes = above.scenes.find((s) => s.scenes);
+
+  res.json({
+    scope: ref.scope,
+    key: ref.key,
+    name: where.name,
+    screens: where.deviceIds === "all" ? null : where.deviceIds.length,
+    group: device?.group ? { id: device.group.id, name: device.group.name } : null,
+    config: own.config,
+    scenes: own.scenes,
+    inherited: {
+      config: mergeConfigPatches(above.config),
+      scenes: inheritedScenes ? { from: inheritedScenes.from, items: inheritedScenes.scenes } : { from: "builtin", items: BUILTIN_SCENES },
+    },
+    // What this level's screens would show, for the preview.
+    effective: ref.scope === "device" ? { config: mergedPatch(device!), playlist: effectivePlaylist(device!) } : null,
+  });
+});
+
+facultyRouter.put("/scopes/:scope/:key/config", canWrite, async (req, res) => {
+  const ref = scopeOf(req);
+  const affected = await setScopeConfig(ref, facultyConfigPatch.parse(req.body), req.user!);
+  await applyScreenChange(affected);
+  res.status(204).end();
+});
+
+facultyRouter.delete("/scopes/:scope/:key/config", canWrite, async (req, res) => {
+  await applyScreenChange(await clearScopeConfig(scopeOf(req), req.user!));
+  res.status(204).end();
+});
+
+facultyRouter.put("/scopes/:scope/:key/playlist", canWrite, async (req, res) => {
+  await applyScreenChange(await setScopePlaylist(scopeOf(req), req.body, req.user!));
+  res.status(204).end();
+});
+
+facultyRouter.delete("/scopes/:scope/:key/playlist", canWrite, async (req, res) => {
+  await applyScreenChange(await clearScopePlaylist(scopeOf(req), req.user!));
+  res.status(204).end();
 });
 
 /** What a screen with this service filter would show now (console preview). */

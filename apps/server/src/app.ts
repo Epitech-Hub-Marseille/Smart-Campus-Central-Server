@@ -13,7 +13,6 @@ import { assetsRouter } from "./routes/assets.js";
 import { authRouter } from "./routes/auth.js";
 import { cardRegistrationRouter } from "./routes/cardRegistration.js";
 import { buildingsRouter } from "./routes/buildings.js";
-import { contentRouter } from "./routes/content.js";
 import { devicesRouter, enrollRouter } from "./routes/devices.js";
 import { emergenciesRouter } from "./routes/emergencies.js";
 import { facultyRouter } from "./routes/faculty.js";
@@ -67,7 +66,6 @@ export function createApp(options: { serverPublicKey?: string } = {}) {
   api.use("/announcement-templates", announcementTemplatesRouter);
   api.use("/schedules", schedulesRouter);
   api.use("/faculty", facultyRouter);
-  api.use("/content", contentRouter);
   api.use("/reservations", reservationsRouter);
   api.use("/assets", assetsRouter);
   api.use("/emergencies", emergenciesRouter);

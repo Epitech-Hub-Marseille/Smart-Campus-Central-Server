@@ -4,7 +4,8 @@ import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { config } from "../config.js";
-import { deleteAsset, storeAudioAsset, storeMediaAsset, wasAssetSentTo } from "../domain/assets.js";
+import { deleteAsset, normalizeFolder, replaceMediaAsset, storeAudioAsset, storeMediaAsset, updateMediaAsset, wasAssetSentTo } from "../domain/assets.js";
+import { assetUsage } from "../domain/screens.js";
 import { activePublicKey } from "../domain/devices.js";
 import { openFile } from "../infra/gridfs.js";
 import { HttpError } from "../lib/errors.js";
@@ -66,9 +67,11 @@ const canWrite = requireRole("admin", "operator");
 
 assetsRouter.get("/", async (req, res) => {
   // Without a kind, the sound library, as before: a screen that lists sounds must not suddenly list videos.
-  const kind = z.enum(["audio", "image", "video"]).default("audio").parse(req.query.kind);
-  const filter = kind === "audio" ? { $or: [{ kind: "audio" }, { kind: { $exists: false } }] } : { kind };
-  res.json({ items: (await AssetModel.find(filter).sort({ createdAt: -1 }).limit(200)).map(assetDto) });
+  // "media" is the content library: images and videos together.
+  const kind = z.enum(["audio", "image", "video", "media"]).default("audio").parse(req.query.kind);
+  const filter = kind === "audio" ? { $or: [{ kind: "audio" }, { kind: { $exists: false } }] } : kind === "media" ? { kind: { $in: ["image", "video"] } } : { kind };
+  const items = await AssetModel.find(filter).sort({ createdAt: -1 }).limit(500);
+  res.json({ items: items.map(assetDto), folders: [...new Set(items.map((a) => a.folder).filter(Boolean))].sort() });
 });
 
 /** Upload to the content library. The kind (image or video) is decided from the file itself. */
@@ -76,7 +79,26 @@ assetsRouter.post("/media", canWrite, rawMedia, async (req, res) => {
   const name = typeof req.query.name === "string" ? req.query.name.trim().slice(0, 100) : "";
   if (!name) throw new HttpError(400, "name is required");
   if (!Buffer.isBuffer(req.body)) throw new HttpError(400, "Send the file as the request body");
-  res.status(201).json(assetDto(await storeMediaAsset(req.body, name, req.user!)));
+  res.status(201).json(assetDto(await storeMediaAsset(req.body, name, req.user!, normalizeFolder(req.query.folder))));
+});
+
+const renameInput = z.object({ name: z.string().trim().min(1).max(100).optional(), folder: z.string().max(40).optional() }).strict();
+
+/** Rename a file or move it to another folder. */
+assetsRouter.patch("/:id", canWrite, async (req, res) => {
+  const input = renameInput.parse(req.body);
+  res.json(assetDto(await updateMediaAsset(String(req.params.id), { ...(input.name && { name: input.name }), ...(input.folder !== undefined && { folder: normalizeFolder(input.folder) }) }, req.user!)));
+});
+
+/** Replace the content of an image or a video; screens that show it get the new version. */
+assetsRouter.put("/:id/file", canWrite, rawMedia, async (req, res) => {
+  if (!Buffer.isBuffer(req.body)) throw new HttpError(400, "Send the file as the request body");
+  res.json(assetDto(await replaceMediaAsset(String(req.params.id), req.body, req.user!)));
+});
+
+/** Which screens, groups or the default show this file. */
+assetsRouter.get("/:id/usage", async (req, res) => {
+  res.json({ items: await assetUsage(String(req.params.id)) });
 });
 
 assetsRouter.post("/", canWrite, rawUpload, async (req, res) => {

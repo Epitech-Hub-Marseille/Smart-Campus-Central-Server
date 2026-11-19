@@ -15,7 +15,7 @@ const STATE_COMMAND_TYPES: readonly CommandType[] = [
   "faculty.config.set",
   // A snapshot: only the newest is true. It is rebuilt on every connection instead of kept in the twin (see domain/faculty.ts).
   "faculty.content.set",
-  "content.set",
+  "carousel.set",
   "reservations.set",
   "audio.settings.set",
   "registration.mode.set",
