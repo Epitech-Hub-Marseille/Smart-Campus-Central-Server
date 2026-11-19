@@ -7,6 +7,7 @@ import {
   FileUp,
   GraduationCap,
   Images,
+  KeyRound,
   LayoutDashboard,
   Megaphone,
   MonitorPlay,
@@ -27,6 +28,8 @@ export interface SectionItem {
   icon: LucideIcon;
   /** One line shown on the section's hub card. */
   description: string;
+  /** Only administrators see this page. */
+  adminOnly?: boolean;
 }
 
 export interface Section {
@@ -119,6 +122,7 @@ export const SECTIONS: Section[] = [
       { to: "/staff", label: "Staff", icon: Users, description: "Accounts, groups and cards." },
       { to: "/students", label: "Students", icon: GraduationCap, description: "Student enrolment and card registration." },
       { to: "/import", label: "CSV import", icon: FileUp, description: "Bulk import of rooms and people." },
+      { to: "/api-keys", label: "API keys", icon: KeyRound, description: "Let other applications use the API with only the scopes they need.", adminOnly: true },
     ],
   },
 ];
@@ -130,3 +134,6 @@ export function sectionFor(pathname: string): Section {
   if (hub) return hub;
   return SECTIONS.find((s) => s.items.some((i) => pathname === i.to || pathname.startsWith(`${i.to}/`))) ?? OVERVIEW;
 }
+
+/** The pages of a section this person may open. */
+export const itemsFor = (section: Section, role: string | undefined) => section.items.filter((i) => !i.adminOnly || role === "admin");

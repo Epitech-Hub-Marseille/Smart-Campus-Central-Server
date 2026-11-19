@@ -3,7 +3,7 @@ import { canEditCampus, useAuth } from "@/auth/AuthContext";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { useOptionalDeviceStatus } from "@/lib/DeviceStatus";
-import { SECTIONS } from "@/lib/sections";
+import { SECTIONS, itemsFor } from "@/lib/sections";
 
 /** Hub page of a section: one box per feature, so the rail only needs one entry for all of them. */
 export function SectionPage() {
@@ -18,7 +18,7 @@ export function SectionPage() {
     <div>
       <PageHeader title={section.label} description={section.summary} />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {section.items.map(({ to, label, icon: Icon, description }) => (
+        {itemsFor(section, user?.role).map(({ to, label, icon: Icon, description }) => (
           <Link key={to} to={to} className="rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
             <Card className="h-full gap-3 transition-colors hover:border-primary/40">
               <CardContent className="flex items-start gap-4">

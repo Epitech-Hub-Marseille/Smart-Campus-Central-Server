@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useDeviceStatus } from "@/lib/DeviceStatus";
-import { SECTIONS } from "@/lib/sections";
+import { SECTIONS, itemsFor } from "@/lib/sections";
 import { useFetch } from "@/lib/useFetch";
 import { DEVICE_TYPE_LABEL, PRIORITY_LABEL, timeAgo, type Announcement, type Building, type Device, type Emergency, type Page, type Reservation, type StaffMember } from "@/lib/types";
 
@@ -165,7 +165,7 @@ export function DashboardPage() {
                 <div>
                   <div className="text-[15px] font-semibold">{s.label}</div>
                   <p className="mt-1 text-sm text-muted-foreground">{s.summary}</p>
-                  <p className="mt-2 text-xs text-muted-foreground">{s.items.map((i) => i.label).join(" · ")}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{itemsFor(s, user?.role).map((i) => i.label).join(" · ")}</p>
                 </div>
               </CardContent>
             </Card>

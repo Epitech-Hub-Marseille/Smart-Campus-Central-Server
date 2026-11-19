@@ -6,7 +6,7 @@ import { IdleWarning } from "@/components/IdleWarning";
 import { Logo, Wordmark } from "@/components/Logo";
 import { Notifications } from "@/components/Notifications";
 import { DeviceStatusProvider, useOptionalDeviceStatus } from "@/lib/DeviceStatus";
-import { SECTIONS, sectionFor, type Section } from "@/lib/sections";
+import { SECTIONS, itemsFor, sectionFor, type Section } from "@/lib/sections";
 import { ROLE_LABEL } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -62,7 +62,7 @@ function Rail({ sections, current, waiting }: { sections: Section[]; current: Se
 }
 
 /** Pages of the current section, shown beside the content (hidden on the overview, which has none). */
-function SectionPanel({ section }: { section: Section }) {
+function SectionPanel({ section, role }: { section: Section; role: string }) {
   if (section.items.length === 0) return null;
   return (
     <nav aria-label={section.label} className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col self-start border-r bg-background lg:flex">
@@ -71,7 +71,7 @@ function SectionPanel({ section }: { section: Section }) {
         <NavLink to={section.to} end className={({ isActive }) => cn(panelLink, focusRing, isActive && panelActive)}>
           Overview
         </NavLink>
-        {section.items.map(({ to, label, icon: Icon }) => (
+        {itemsFor(section, role).map(({ to, label, icon: Icon }) => (
           <NavLink key={to} to={to} className={({ isActive }) => cn(panelLink, focusRing, isActive && panelActive)}>
             <Icon className="size-4" aria-hidden /> {label}
           </NavLink>
@@ -129,7 +129,7 @@ function Shell() {
       </aside>
 
       <div className="flex min-h-screen md:pl-[88px]">
-        <SectionPanel section={current} />
+        <SectionPanel section={current} role={user.role} />
         <div className="min-w-0 flex-1">
           <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/90 px-4 backdrop-blur md:px-8">
             <button aria-label="Open menu" className={cn("rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground md:hidden", focusRing)} onClick={() => setMenuOpen(true)}>
@@ -168,7 +168,7 @@ function Shell() {
                   <NavLink to={s.to} end className={({ isActive }) => cn(panelLink, "font-medium text-foreground", focusRing, isActive && panelActive)}>
                     <s.icon className="size-4" aria-hidden /> {s.label}
                   </NavLink>
-                  {s.items.map(({ to, label, icon: Icon }) => (
+                  {itemsFor(s, user.role).map(({ to, label, icon: Icon }) => (
                     <NavLink key={to} to={to} className={({ isActive }) => cn(panelLink, "pl-10", focusRing, isActive && panelActive)}>
                       <Icon className="size-4" aria-hidden /> {label}
                     </NavLink>

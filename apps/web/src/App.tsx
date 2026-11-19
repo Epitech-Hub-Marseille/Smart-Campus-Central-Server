@@ -8,6 +8,7 @@ import { MediaPage } from "@/pages/MediaPage";
 import { NewsPage } from "@/pages/NewsPage";
 import { ScreensPage } from "@/pages/ScreensPage";
 import { ReservationsPage } from "@/pages/ReservationsPage";
+import { ApiKeysPage } from "@/pages/ApiKeysPage";
 import { SecurityPage } from "@/pages/SecurityPage";
 import { SectionPage } from "@/pages/SectionPage";
 import { SchedulesPage } from "@/pages/SchedulesPage";
@@ -58,6 +59,9 @@ export default function App() {
                 <Route path="/news" element={<NewsPage />} />
                 <Route path="/statuses" element={<StatusesPage />} />
                 <Route path="/staff" element={<StaffPage />} />
+                <Route element={<ProtectedRoute roles={["admin"]} />}>
+                  <Route path="/api-keys" element={<ApiKeysPage />} />
+                </Route>
                 <Route path="/students" element={<StudentsPage />} />
                 <Route path="/import" element={<ImportPage />} />
               </Route>
