@@ -279,6 +279,8 @@ function checkScene(scene: { layout: SceneLayoutId; tiles: { kind: string; setti
 export const sceneInput = z
   .object({
     ...sceneBase,
+    /** A paused scene stays in the playlist but is not sent. */
+    enabled: z.boolean().default(true),
     tiles: z
       .array(
         z.object({ id: z.string().min(1).max(64), kind: z.string().min(1).max(30), settings: z.record(z.string(), z.unknown()).default({}) }).superRefine((tile, ctx) => {
@@ -347,10 +349,11 @@ export const facultyConfigPatch = z
         /** `null` means "no logo", which is different from not saying anything. */
         logo: assetPointer.nullable(),
       })
-      .partial(),
+      .partial()
+      .strict(),
     service: z.enum(SERVICE_FILTER),
-    carousel: z.object({ enabled: z.boolean() }).partial(),
-    widgets: z.object({ clock: z.boolean(), date: z.boolean(), weather: z.boolean() }).partial(),
+    carousel: z.object({ enabled: z.boolean() }).partial().strict(),
+    widgets: z.object({ clock: z.boolean(), date: z.boolean(), weather: z.boolean() }).partial().strict(),
     weather: z.object({ label: z.string().trim().max(60), latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) }).nullable(),
   })
   .partial()
