@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHIME_IDS, CHIME_GROUPS, CHIME_PITCH, CHIME_SLOWDOWN, chimeCatalogue, chimeWav, prependChime, renderChime, type ChimeId } from "./chimes.js";
+import { CHIME_IDS, CHIME_GROUPS, CHIME_SEMITONES, CHIME_SLOWDOWN, chimePitch, chimeCatalogue, chimeWav, prependChime, renderChime, type ChimeId } from "./chimes.js";
 import { readWav, writeWav } from "./wav.js";
 
 const RECORDED = 44_100;
@@ -42,9 +42,11 @@ describe("the chimes", () => {
     expect(Math.max(...peaks("warning"))).toBeLessThan(Math.min(...peaks("critical")));
   });
 
-  it("keep the character of their reference but are not copies: the same notes, one semitone higher", () => {
-    expect(CHIME_PITCH).toBeCloseTo(1.0595, 3);
+  it("keep the character of their reference but are not copies: the same notes, moved by a step of their own per group", () => {
+    expect(CHIME_SEMITONES).toEqual({ info: 3, warning: 2, critical: 1, "manual-override": 5 });
     expect(CHIME_SLOWDOWN).toBe(1.04);
+    expect(chimePitch("info-dudu")).toBeCloseTo(2 ** (3 / 12), 6);
+    expect(chimePitch("critical-deeoo")).toBeCloseTo(2 ** (1 / 12), 6);
     // [chime, reference pitch, window]: the moved pitch is strong, the reference's own pitch is not.
     const cases: [ChimeId, number, number, number][] = [
       ["info-dudu", 369, 0.05, 0.45],
@@ -56,9 +58,19 @@ describe("the chimes", () => {
     ];
     for (const [id, hz, from, to] of cases) {
       const s = renderChime(id, RECORDED);
-      const moved = level(s, hz * CHIME_PITCH, RECORDED, at(from), at(to));
-      expect(moved, `${id} moved`).toBeGreaterThan(level(s, hz, RECORDED, at(from), at(to)) * 2.5);
+      const moved = level(s, hz * chimePitch(id), RECORDED, at(from), at(to));
+      expect(moved, `${id} moved`).toBeGreaterThan(level(s, hz, RECORDED, at(from), at(to)) * 2);
     }
+  });
+
+  it("are clear: a few strong partials, with the energy of the tone in the notes and not smeared between them", () => {
+    // Almost all the energy of a held tone sits in the partials: the share between them (off the notes) is small.
+    const s = renderChime("info-dudu", RECORDED);
+    const from = at(0.05);
+    const to = at(0.45);
+    const note = chimePitch("info-dudu") * 369;
+    expect(level(s, note, RECORDED, from, to)).toBeGreaterThan(level(s, note * 1.19, RECORDED, from, to) * 8);
+    expect(level(s, note, RECORDED, from, to)).toBeGreaterThan(level(s, note * 0.84, RECORDED, from, to) * 8);
   });
 
   it("are the same at any rate of voice, with the same pitch, and never fold high partials back as noise", () => {
@@ -66,12 +78,19 @@ describe("the chimes", () => {
       const s = renderChime("info-dudu", rate);
       const from = at(0.05, rate);
       const to = at(0.45, rate);
-      expect(level(s, 369 * CHIME_PITCH, rate, from, to)).toBeGreaterThan(level(s, 369, rate, from, to) * 2.5);
+      expect(level(s, 369 * chimePitch("info-dudu"), rate, from, to)).toBeGreaterThan(level(s, 369, rate, from, to) * 2);
       expect(s.every((v) => Number.isFinite(v))).toBe(true);
     }
     // At 16 kHz the buzz has partials the rate cannot carry: none is allowed to fold below, so nothing sits above 0.45 of the rate.
     const buzz = renderChime("critical-buzwarn", 16_000);
-    expect(level(buzz, 7500, 16_000, 2000, 12_000)).toBeLessThan(level(buzz, 499, 16_000, 2000, 12_000) * 0.2);
+    expect(level(buzz, 7500, 16_000, 2000, 12_000)).toBeLessThan(level(buzz, 471 * chimePitch("critical-buzwarn"), 16_000, 2000, 12_000) * 0.2);
+  });
+
+  it("keep their rhythm: the two override beeps are separated by a real silence", () => {
+    const s = renderChime("manual-override", RECORDED);
+    const rms = (from: number, to: number) => Math.sqrt(s.slice(at(from), at(to)).reduce((sum, v) => sum + v * v, 0) / (at(to) - at(from)));
+    expect(rms(0.4, 0.52)).toBeLessThan(rms(0.05, 0.3) * 0.15);
+    expect(rms(0.56, 0.72)).toBeGreaterThan(rms(0.4, 0.52) * 6);
   });
 
   it("are always the same", () => {

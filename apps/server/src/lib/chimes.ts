@@ -7,7 +7,8 @@ import { readWav, writeWav, type PcmWav } from "./wav.js";
  * level over time), its overall loudness and its peak level, in `assets/chimes/*.json`. The synthesiser plays those tracks as
  * sine waves, so a chime keeps the character of its reference (soft blips for information, held "da-da" tones for a warning, a
  * stab and a buzz for a critical message, beeps for a manual override, the roughness of each tone and the rhythm), but it is
- * not a copy: every chime is moved up one semitone and played 4% slower, and no recording is kept or played.
+ * not a copy: every chime is moved to its own pitch (a different step for each group) and played 4% slower, and no recording is kept
+ * or played. To keep them clear, only the strongest partials are played, with their pitch smoothed.
  *
  * A chime is built at the sample rate of the voice it precedes and joined to it on the server, so a door unit or a Faculty
  * screen just plays one file and needs to know nothing about chimes.
@@ -50,9 +51,19 @@ export const chimeCatalogue = () => ({ groups: CHIME_GROUPS, chimes: CATALOGUE.m
 
 const specOf = (id: string): ChimeSpec | undefined => CATALOGUE.find((c) => c.id === id);
 
-/** What makes a chime its own and not a copy: one semitone higher, 4% slower. */
-export const CHIME_PITCH = 2 ** (1 / 12);
+/**
+ * What makes a chime its own and not a copy: each group is moved up by its own number of semitones (information a minor third,
+ * warning a whole tone, critical a semitone, manual override a fourth) and every chime is played 4% slower.
+ */
+export const CHIME_SEMITONES: Record<ChimeGroup, number> = { info: 3, warning: 2, critical: 1, "manual-override": 5 };
 export const CHIME_SLOWDOWN = 1.04;
+export const chimePitch = (id: ChimeId) => 2 ** (CHIME_SEMITONES[specOf(id)!.group] / 12);
+
+/** A clear chime plays few partials, each loud enough to be heard: the strongest ones, none under this share of the strongest. */
+const MAX_TRACKS = 14;
+const MIN_LEVEL = 0.1;
+/** Seconds a partial takes to reach its level when it starts. */
+const PARTIAL_RISE = 0.008;
 
 /** One sine wave over time: breakpoints of [seconds, hertz, level]. */
 type Track = [number, number, number][];
@@ -72,9 +83,32 @@ const measurements = new Map<string, Measured>();
 function measured(id: ChimeId): Measured {
   const cached = measurements.get(id);
   if (cached) return cached;
-  const data = JSON.parse(readFileSync(new URL(`../../assets/chimes/${id}.json`, import.meta.url), "utf8")) as Measured;
+  const data = clarify(JSON.parse(readFileSync(new URL(`../../assets/chimes/${id}.json`, import.meta.url), "utf8")) as Measured);
   measurements.set(id, data);
   return data;
+}
+
+const median = (values: number[]) => [...values].sort((a, b) => a - b)[values.length >> 1]!;
+
+/**
+ * Keeps what makes the sound clear: the strongest partials only, without the faint ones that blur it, and each partial's pitch
+ * smoothed over five breakpoints, which removes the small jumps the measurement leaves on a steady tone (a held note then
+ * sounds held and not wobbly) while a real glide, which is slow, stays.
+ */
+function clarify(data: Measured): Measured {
+  const weight = (track: Track) => track.reduce((sum, [, , level]) => sum + level * level, 0);
+  const loudest = Math.max(...data.tracks.map((t) => Math.max(...t.map((point) => point[2]))));
+  const strongest = [...data.tracks]
+    .filter((t) => Math.max(...t.map((point) => point[2])) >= loudest * MIN_LEVEL)
+    .sort((a, b) => weight(b) - weight(a))
+    .slice(0, MAX_TRACKS);
+  const tracks = strongest.map((track) =>
+    track.map(([time, hz, level], i): [number, number, number] => {
+      const around = track.slice(Math.max(0, i - 2), i + 3).map((point) => point[1]);
+      return [time, median(around), level];
+    }),
+  );
+  return { ...data, tracks };
 }
 
 /** Linear interpolation of a breakpoint list [time, ...values] at `t`, held at both ends. */
@@ -101,15 +135,19 @@ export function renderChime(id: ChimeId, sampleRate: number): Float32Array {
   const out = new Float32Array(Math.round((data.duration * CHIME_SLOWDOWN + 0.05) * sampleRate));
   // A partial above what the rate can carry would fold back into the sound as noise, so it is left out.
   const limit = sampleRate * 0.45;
+  const pitch = chimePitch(id);
   for (const track of data.tracks) {
     const first = Math.max(0, Math.floor(track[0]![0] * CHIME_SLOWDOWN * sampleRate));
     const last = Math.min(out.length - 1, Math.ceil(track[track.length - 1]![0] * CHIME_SLOWDOWN * sampleRate));
     let phase = 0;
     for (let i = first; i <= last; i++) {
-      const [hz, level] = at(track, i / sampleRate / CHIME_SLOWDOWN);
-      const frequency = hz * CHIME_PITCH;
+      const time = i / sampleRate / CHIME_SLOWDOWN;
+      const [hz, level] = at(track, time);
+      const frequency = hz * pitch;
       phase += (2 * Math.PI * frequency) / sampleRate;
-      if (frequency < limit) out[i]! += level * Math.sin(phase);
+      // A partial that starts at full level is a click: each one rises over a few milliseconds.
+      const rise = Math.min(1, (time - track[0]![0]) / PARTIAL_RISE);
+      if (frequency < limit) out[i]! += rise * level * Math.sin(phase);
     }
   }
   shapeLoudness(out, data.loudness, sampleRate);
@@ -125,8 +163,8 @@ export function renderChime(id: ChimeId, sampleRate: number): Float32Array {
 
 /**
  * Gives the synthesised chime the attack and fall of the reference: the sine waves alone are too smooth where the original
- * strikes or fades, so each 10 ms of the chime is brought towards the loudness the reference had at that moment (limited, so
- * it never goes far).
+ * strikes or fades, so each 10 ms of the chime is brought towards the loudness the reference had at that moment. It may turn a
+ * part down a long way, which is what brings back the silence between two beeps, but never turn one up by more than 2.2.
  */
 function shapeLoudness(out: Float32Array, target: number[], sampleRate: number): void {
   const step = Math.round(LOUDNESS_STEP * sampleRate);
@@ -140,7 +178,7 @@ function shapeLoudness(out: Float32Array, target: number[], sampleRate: number):
     const lower = Math.min(target.length - 1, Math.floor(position));
     const upper = Math.min(target.length - 1, lower + 1);
     const wanted = target[lower]! + (target[upper]! - target[lower]!) * (position - lower);
-    gains.push(Math.min(3, Math.max(0.35, wanted / mine)));
+    gains.push(Math.min(2.2, Math.max(0.03, wanted / mine)));
   }
   // Smooth over 5 frames, then spread between the centres of the frames.
   const smooth = gains.map((_, f) => {

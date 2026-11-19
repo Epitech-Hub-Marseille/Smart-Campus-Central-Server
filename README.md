@@ -78,7 +78,8 @@ decision, so the shipped implementation speaks the OpenAI `POST /audio/speech` A
   11 below). They are synthesised from measurements of the reference sounds of `docs/inspiration/chimes`: `apps/server/tools/chime-analysis.py` stores, for each
   sound, the tracks of its partials (pitch and level over time), its loudness and its peak in `apps/server/assets/chimes/*.json` (about 240 KB, shipped through
   `files` in `package.json`), and `lib/chimes.ts` plays them as sine waves. So each chime keeps the character of its reference (the roughness of the tone, the
-  rhythm, the level) without being a copy: every one is moved up a semitone and played 4% slower, and no recording is kept. The groups are **information**
+  rhythm, the level) without being a copy: each group is moved up by a step of its own (information a minor third, warning a whole tone, critical a semitone, manual
+  override a fourth), every chime is played 4% slower, and no recording is kept. Only the strongest partials are played, with their pitch smoothed, so the sounds stay clear. The groups are **information**
   (`info-bloop`, `info-doop`, `info-dudu`: soft blips), **warning** (`warning-dadaa`, `-dadab`, `-dadac`, `-dadeda`: held "da-da" tones), **critical**
   (`critical-buzwarn`, `critical-deeoo`: a buzz and a falling stab) and **manual override** (`manual-override`, `important-manual-override`). The more serious, the
   louder and rougher, and the shorter the pause before the voice (0.35 s, 0.25 s, 0.15 s, 0.2 s). A chime is built at the rate of the voice and joined to it on the
