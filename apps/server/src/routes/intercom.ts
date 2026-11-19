@@ -50,7 +50,8 @@ intercomRouter.get("/chimes", (_req, res) => {
 intercomRouter.get("/chimes/:id", (req, res) => {
   const id = z.enum(CHIME_IDS).parse(req.params.id);
   res.setHeader("Content-Type", "audio/wav");
-  res.setHeader("Cache-Control", "private, max-age=3600");
+  // Not cached for an hour: the chimes change with the server, and a browser that kept the old one would play it after an update.
+  res.setHeader("Cache-Control", "no-cache");
   res.send(chimeWav(id));
 });
 
