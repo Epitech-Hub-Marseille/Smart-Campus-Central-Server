@@ -46,7 +46,7 @@ The single `pnpm-lock.yaml` at the root is committed.
 | InterCom | Record or import a sound (stored in GridFS, WAV/MP3/Ogg/WebM/M4A, `MAX_AUDIO_MB`), broadcast it to chosen devices. Devices download it over a request signed with their key. Volume and quiet hours per device. **Voice announcements**: type a text, choose a language and a voice, listen to it, then broadcast it (see [Voice and schedules](#voice-announcements-schedules-and-templates)) |
 | Schedules and templates | Announcements that send themselves once, daily, weekly, or when a room changes status; a library of reusable announcement texts |
 | Faculty screens | The information board of the reference design (events of the day, booked rooms, announcements, a news ticker) plus staff availability (updated by the staff themselves, filtered by service), with carousel, clock, date and weather widgets. The screen application is in its own repository, `SmartCampus-FacultyScreens` |
-| Custom content | Images, videos, texts and live web pages for the Faculty screens, each with a duration, a schedule and targets (everyone, buildings, floors, groups, devices); a screen shows the board, the custom content, or both taking turns |
+| Faculty screens | Screens grouped and configured by level (default, group, screen: the most specific wins, field by field). A carousel of scenes, each a layout of tiles: news, staff, reservations, images, videos, texts, web pages, live radio, live video streams and YouTube. A media library with folders, rename, replace and usage |
 | Reservations | Book a room without conflicts; the door screen shows the next booking and Faculty screens list the day |
 | Display config | Layout, theme, visible elements and night sleep per screen, validated by the shared schema, duplicated to several screens |
 | Audit | `auditLogs` entries for device approval/revocation, status changes, announcements, emergency alerts, uploads, broadcasts and configuration changes (the viewer is #27) |
@@ -91,26 +91,47 @@ announcement, voice or schedule form.
 
 ## Faculty screens
 
-Displays (`type: display`) get two commands. `faculty.config.set` is the look (staff service filter, carousel interval and slides, clock/date/weather
-widgets; weather needs a latitude and longitude and is fetched by the screen itself) and is part of the digital twin. `faculty.content.set` is a
-snapshot of news, staff availability and today's reservations. The snapshot is **not** kept in the twin: it is derived data and would not fit in
-`session.ready`, so the server rebuilds it when the screen connects and whenever news, availability, reservations or the directory change. Counts
-and field lengths are bounded (8 news, 40 staff, 15 reservations) so the worst case fits a frame; a test proves it.
+Displays (`type: display`) get three commands. `faculty.config.set` is the look (site name, subtitle and logo, staff service filter, clock/date/weather
+widgets, whether the carousel rotates; weather needs a latitude and longitude and is fetched by the screen itself) and is part of the digital twin.
+`carousel.set` is what the screen rotates through (see below). `faculty.content.set` is a snapshot of news, staff availability and today's reservations.
+The last two are **not** kept in the twin: they are derived data and would not fit in `session.ready`, so the server rebuilds them when the screen
+connects and whenever something they depend on changes. Counts and field lengths are bounded (8 news, 40 staff, 15 reservations, 12 scenes and 24
+tiles) so the worst case fits a frame; tests prove it.
 
 - `/faculty/news` (read by all, written by admins and operators), `/faculty/staff?service=`, `PUT /faculty/availability/me` (everyone updates their own
   status, with a note and an optional end time after which they show as available again), `PUT /faculty/availability/:userId` (admin, operator),
-  `GET/PUT /faculty/displays`. A person is listed once an admin or operator sets their `service` (`pedagogical` or `administrative`) in the staff directory.
+  `GET /faculty/screens`. A person is listed once an admin or operator sets their `service` (`pedagogical` or `administrative`) in the staff directory.
 - The Faculty display application is `SmartCampus-FacultyScreens`: an edge agent that holds the device key and this link, and a kiosk page. `apps/device-sim` logs what such a screen would show.
 
-### Custom content
+### Groups, settings and playlists
 
-The media library takes images and videos next to the sounds: `POST /api/assets/media?name=…` (raw body, `MAX_MEDIA_MB`), `GET /api/assets?kind=image|video` (without `kind`, the sound library, as before). The kind and type are decided from the file's first bytes: PNG, JPEG, WebP, GIF, MP4 and WebM, never SVG (it can carry scripts) and never an audio-only MP4. A file used by a slide or a screen logo cannot be deleted.
+Screens can be put in **groups** (`POST/PUT/DELETE /api/faculty/groups`); a screen is in one group at most. Settings and playlists live on three levels:
+the **default** (every screen), a **group**, and one **screen**. For settings, each field is inherited unless a level sets it, and the most specific level
+wins field by field: a screen's own site name beats its group's, which beats the default, while the fields it does not set keep following the group.
+`null` is a value ("no logo"), saying nothing inherits. A **playlist** is replaced whole: a screen with its own playlist ignores its group's. Without any
+playlist, a screen shows the built-in board (news, staff, reservations). Endpoints, for admins and operators, with `-` as the key of the default level:
+`GET /api/faculty/scopes/:scope/:key` (what the level sets, what it inherits, and what a screen would show), `PUT|DELETE …/config` and `PUT|DELETE …/playlist`
+(delete means "inherit again"), and `GET /api/faculty/tile-kinds` for the layouts and tile kinds.
 
-Slides (`/api/content`, admins and operators) are an image or video from the library, a text (400 characters), or an http(s) web page reloaded every `refreshSeconds`, with `durationSeconds` (3 to 600), `fit`, an optional window (`startsAt`, `endsAt`), `targets` (the same selectors as announcements) and `enabled`. Each Faculty screen gets its playlist as `content.set`: the enabled slides that are not over and that target it, at most 24, with the file references (`assetId`, `sha256`, `size`, `mime`) built from the library, never from the request. The playlist is derived data: it is rebuilt when a slide changes, on every connection and every 30 minutes, and is not kept in the digital twin. A screen set to `default` mode receives an empty one, so it downloads nothing. The screen applies the dates itself, so a schedule works through an outage, and it only switches to a new playlist once every file is downloaded and verified (it acknowledges then, or answers `nack`).
+### Carousel: scenes and tiles
 
-A screen downloads a file with a signed request, as for sounds, and only a file its own playlist or logo names (`audio.play`, `content.set` and `faculty.config.set` are what authorise a download).
+A playlist is a list of **scenes** (up to 12, 24 tiles in all). A scene has a layout (full screen, two columns, two rows, main and side, main and two side,
+four tiles), a duration (3 to 600 s), an optional window (`startsAt`, `endsAt`), can be paused, and holds one tile per slot. Tile kinds are data
+(`TILE_KINDS` in `packages/protocol/src/screens.ts`): news, staff availability, reservations, image, video, text, web page, **live radio** (an HTTP audio
+stream), **live video stream** (HLS, live MP4 or MJPEG, not YouTube) and **YouTube** (any address, stored as the video id). The console builds its forms from
+that description, so adding a kind is one entry there plus a renderer on the screen; a screen that does not know a kind skips the tile. Only one tile of a
+scene may play sound, the server refuses more. Addresses must be http(s). The screen applies the dates itself, so a schedule works through an outage, and it
+switches to a new carousel once every file is downloaded and verified.
 
-The screen's look is part of `faculty.config.set`: `mode` (`default`, `custom` or `mixed`) and `site` (name, subtitle, zone, assembly point, emergency number and logo), which the board's header and the emergency screen use.
+### Media library
+
+Images and videos live next to the sounds: `POST /api/assets/media?name=…&folder=…` (raw body, `MAX_MEDIA_MB`), `GET /api/assets?kind=media|image|video`
+(without `kind`, the sound library, as before; the answer lists the folders), `PATCH /api/assets/:id` (rename or move), `PUT /api/assets/:id/file` (replace the
+content: the id stays, the kind cannot change, and every screen that shows it gets the new version) and `GET /api/assets/:id/usage` (which screens, groups or
+default use it). The kind and type are decided from the file's first bytes: PNG, JPEG, WebP, GIF, MP4 and WebM, never SVG (it can carry scripts) and never an
+audio-only MP4. A file that a playlist or a logo uses cannot be deleted; the error says where. File references (`assetId`, `sha256`, `size`, `mime`) are
+built from the library on the server, never from the request. A screen downloads a file with a signed request, as for sounds, and only a file its own
+carousel or logo names (`audio.play`, `carousel.set` and `faculty.config.set` are what authorise a download).
 
 ## Reservations
 
