@@ -44,6 +44,8 @@ const schema = z.object({
   GATEWAY_CONNECTS_PER_MINUTE: z.coerce.number().int().positive().default(30),
   // Enrollment requests per address per 15 minutes (the endpoint is public). Raise it for protocol test runs.
   ENROLL_RATE_LIMIT: z.coerce.number().int().positive().default(20),
+  /** Per minute and per address: a waiting device checks every few seconds, and several screens may share an address. */
+  ENROLL_STATUS_RATE_LIMIT: z.coerce.number().int().positive().default(120),
 
   // Optional bootstrap admin, created on startup if it does not exist yet.
   SEED_ADMIN_EMAIL: z.string().email().optional(),
