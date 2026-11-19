@@ -43,6 +43,7 @@ The single `pnpm-lock.yaml` at the root is committed.
 | Room status | Free, occupied, closed and works built in, plus custom statuses (label, colour, icon). Changing a status is stored with its history, pushed to the door screens of the room and audited |
 | Announcements | Text announcements on door and faculty screens, targeted by device, group, building, floor or everyone, with priority (info, important, urgent) and an expiry the screen enforces by itself |
 | Two-factor authentication | Authenticator-app codes (TOTP, RFC 6238). Administrators must set it up before the console lets them do anything else; everyone else may. Ten single-use recovery codes, a lockout after five wrong codes, and a reset by another administrator. Every emergency alert, test or real, asks for a fresh code. |
+| Themes | A theme is JSON tokens (colours, a font family from a fixed list, a text scale, a corner radius) that door units and Faculty screens both apply, plus optional CSS for the Faculty screens. Set for all of a kind, a group or one device; the most specific wins. |
 | API keys | Keys for other applications to use the official API, each with only the scopes it needs, a required end date (at most one year), instant revocation and a usage log. Created by administrators with a fresh authenticator code, shown once, stored hashed. |
 | Emergency alerts | Fire, biohazard, radiation leak, bomb threat, earthquake and power cut. Takes over the door screens (door code, chevrons towards the emblem, procedure) and loops a synthesised alarm until ended. Test mode shows a TEST tag and plays at a chosen volume. Kept in the digital twin, so an offline screen sounds the alarm when it reconnects and stops if the alert ended meanwhile. A real alert needs two steps enforced by the API, can also be read aloud, and ends with a message shown on the screens (see [Emergency alerts](#emergency-alerts)) |
 | InterCom | Record or import a sound (stored in GridFS, WAV/MP3/Ogg/WebM/M4A, `MAX_AUDIO_MB`), broadcast it to chosen devices. Devices download it over a request signed with their key. Volume and quiet hours per device. **Voice announcements**: type a text, choose a language and a voice, listen to it, then broadcast it (see [Voice and schedules](#voice-announcements-schedules-and-templates)) |
@@ -265,3 +266,22 @@ Other applications use the same API as the console, with `Authorization: Bearer 
 - **Every call is logged** (method, path without its query string, status, address), refused ones included, for 90 days, and shown in the console.
   A key is limited to 300 calls a minute. Changes made with a key appear in the audit log as `API key: <name>`.
 - A request with a key that is wrong, expired or revoked always gets the same `401 invalid_api_key`; a key never falls back to a cookie.
+
+## Themes
+
+A theme gives the door units and the Faculty screens a look of their own. It is **tokens** (JSON, the same for both apps) and optionally **CSS**
+(Faculty screens only; a door unit ignores it and is not sent it). Tokens are a closed set (`packages/protocol/src/theme.ts`): ten colours as
+`#rrggbb` (background, cards, text, secondary text, accent, text on accent, borders, success, warning, danger), `mode` (light or dark), a font family
+from a fixed list (system, sans, serif, mono, condensed: an arbitrary font cannot be assumed to exist on a device), a text scale from 0.8 to 1.4 and a
+corner radius from 0 to 32. Whatever a theme leaves out keeps the app's own look, and a device ignores a token it does not know.
+
+- **CSS is checked** by the server and again by the device: at most 12,000 characters, no `url()`, `@import`, `@font-face`, `expression()`,
+  `javascript:` or escape sequences, balanced braces, nothing that could close its own `<style>`. Nothing can be loaded from elsewhere.
+- **Emergency alerts and the end-of-alert notice are never themed.** A Faculty screen removes the theme's CSS while one is showing.
+- **Which theme applies.** `PUT /api/themes/assignments {scope, key, themeId|null}` with scope `device`, `group` (a device group) or `default` (key `door`
+  or `display`). A device wears, in this order, its own theme, the theme of its group (the first in alphabetical order if it is in several), the
+  default for its kind, or nothing. `GET /api/themes/resolve/:deviceId` says which and why.
+- **Delivery.** `theme.set` is part of the digital twin: sent when the resolved theme changes (an edit raises its `version`), and with the desired
+  state when a device connects. Only devices whose theme actually changed are told. A theme that is assigned cannot be deleted.
+- **Console** (Devices, Themes): colour pickers, font, size and corner controls, CSS, import and export of the JSON and CSS files, a preview of both
+  apps (the Faculty one in a frame with no scripts and no network), and the assignments.
