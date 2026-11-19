@@ -8,13 +8,19 @@ import { hashPassword } from "../lib/password.js";
 import { requestEnrollment } from "../domain/devices.js";
 import { seedRoomStatuses } from "../domain/roomStatus.js";
 import { attachGateway } from "../gateway/index.js";
+import { seal } from "../lib/secretBox.js";
+import { codeAt, stepOf } from "../lib/totp.js";
 import { UserModel, type Role } from "../models/user.js";
 import { TestDevice } from "../gateway/__tests__/testDevice.js";
 
 const PASSWORD = "correct-horse-battery";
+/** The authenticator secret of the test admins and operators. */
+export const TEST_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
 
 export interface ApiClient {
   request(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }>;
+  /** A valid authenticator code for this user right now (admins and operators have two-factor on, like in production). */
+  code(): Promise<string>;
   /** Raw request, for uploads and downloads. */
   raw(method: string, path: string, init?: { body?: Buffer; headers?: Record<string, string> }): Promise<Response>;
 }
@@ -41,8 +47,13 @@ export async function startHarness() {
       headers: { ...(cookie && { cookie }), ...init.headers },
     });
 
-  const client = (cookie: string | null): ApiClient => ({
+  const client = (cookie: string | null, email?: string): ApiClient => ({
     raw: raw(cookie),
+    async code() {
+      // The same code cannot be used twice, as in production; a test that needs several simply asks again.
+      await UserModel.updateOne({ email }, { $set: { "twoFactor.lastUsedStep": -1 } });
+      return codeAt(TEST_TOTP_SECRET, stepOf(Date.now()));
+    },
     async request(method, path, body) {
       const res = await raw(cookie)(method, path, {
         body: body === undefined ? undefined : Buffer.from(JSON.stringify(body)),
@@ -63,15 +74,26 @@ export async function startHarness() {
   async function signIn(role: Role): Promise<ApiClient> {
     const email = `${role}@test.local`;
     const existing = await UserModel.findOne({ email });
-    if (!existing) await UserModel.create({ email, name: `Test ${role}`, groups: role === "staff" ? [] : [role], passwordHash: await hashPassword(PASSWORD) });
-    const res = await fetch(`${origin}/api/auth/login`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email, password: PASSWORD }),
-    });
+    if (!existing) {
+      await UserModel.create({
+        email,
+        name: `Test ${role}`,
+        groups: role === "staff" ? [] : [role],
+        passwordHash: await hashPassword(PASSWORD),
+        ...(role !== "staff" && { twoFactor: { enabled: true, secret: seal(TEST_TOTP_SECRET), lastUsedStep: -1, recoveryHashes: [] } }),
+      });
+    }
+    const post = (path: string, body: unknown) => fetch(`${origin}/api${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    let res = await post("/auth/login", { email, password: PASSWORD });
     if (!res.ok) throw new Error(`test login failed for ${role}: ${res.status}`);
+    const first = await res.json();
+    if (first.twoFactorRequired) {
+      // The way a person does it: the password, then a code from the phone.
+      res = await post("/auth/login/2fa", { challenge: first.challenge, code: codeAt(TEST_TOTP_SECRET, stepOf(Date.now())) });
+      if (!res.ok) throw new Error(`test second factor failed for ${role}: ${res.status}`);
+    }
     const cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
-    return client(cookie);
+    return client(cookie, email);
   }
 
   /** Real enrollment (request, then approval through the console API) and an active device with its identity key. */

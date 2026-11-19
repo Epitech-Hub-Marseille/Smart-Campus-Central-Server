@@ -4,7 +4,7 @@ import express, { type ErrorRequestHandler } from "express";
 import helmet from "helmet";
 import mongoose from "mongoose";
 import { ZodError } from "zod";
-import { attachUser, sameOriginGuard } from "./auth/middleware.js";
+import { attachUser, enforceAdminTwoFactor, sameOriginGuard } from "./auth/middleware.js";
 import { config, isProd } from "./config.js";
 import { HttpError } from "./lib/errors.js";
 import { announcementTemplatesRouter } from "./routes/announcementTemplates.js";
@@ -52,6 +52,7 @@ export function createApp(options: { serverPublicKey?: string } = {}) {
   const api = express.Router();
   api.use(sameOriginGuard);
   api.use(attachUser);
+  api.use(enforceAdminTwoFactor);
 
   api.get("/health", (_req, res) => {
     const dbUp = mongoose.connection.readyState === 1;
@@ -104,7 +105,7 @@ export function createApp(options: { serverPublicKey?: string } = {}) {
       // Why: body-parser throws http-errors (e.g. 413 for an oversized upload) that must not turn into a 500.
       res.status(err.status).json({ error: err.status === 413 ? "The request body is too large" : "Invalid request body" });
     } else if (err instanceof HttpError) {
-      res.status(err.status).json({ error: err.message });
+      res.status(err.status).json({ error: err.message, ...(err.code && { code: err.code }) });
     } else {
       console.error(err);
       res.status(500).json({ error: "Internal server error" });

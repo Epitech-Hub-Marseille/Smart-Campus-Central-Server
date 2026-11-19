@@ -12,6 +12,7 @@ export interface UserLike {
   phone?: string | null;
   disabled: boolean;
   passwordHash?: string | null;
+  twoFactor?: { enabled?: boolean | null } | null;
   createdAt?: Date;
 }
 
@@ -29,5 +30,6 @@ export const userDto = (u: UserLike | UserDoc) => ({
   phone: u.phone ?? "",
   disabled: u.disabled,
   hasPassword: Boolean(u.passwordHash),
+  twoFactor: Boolean(u.twoFactor?.enabled),
   createdAt: u.createdAt,
 });

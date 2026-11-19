@@ -4,6 +4,7 @@ import { assertCanManage, assertNotLastAdmin } from "../auth/permissions.js";
 import { requireRole } from "../auth/middleware.js";
 import { sendPasswordLink } from "../auth/passwordReset.js";
 import { revokeUserSessions } from "../auth/sessions.js";
+import { resetByAdmin } from "../auth/twoFactor.js";
 import { HttpError } from "../lib/errors.js";
 import { escapeRegex, objectId, optionalText, pagination, passwordSchema } from "../lib/http.js";
 import { hashPassword } from "../lib/password.js";
@@ -167,3 +168,11 @@ async function auditAccess(actor: PublicUser, user: UserDoc, meta: Record<string
     hasCard: Boolean(user.cardUid),
   });
 }
+
+/** Takes someone's second factor away (lost phone and recovery codes). Administrators only, never one's own. */
+usersRouter.post("/:id/two-factor/reset", requireRole("admin"), async (req, res) => {
+  const target = await UserModel.findById(objectId(req.params.id));
+  if (!target) throw new HttpError(404, "User not found");
+  await resetByAdmin(req.user!, target);
+  res.status(204).end();
+});

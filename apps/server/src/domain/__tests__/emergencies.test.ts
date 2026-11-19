@@ -23,7 +23,7 @@ beforeEach(async () => {
   await Promise.all([DeviceModel.deleteMany({}), CommandModel.deleteMany({}), EmergencyModel.deleteMany({}), EmergencyConfirmationModel.deleteMany({}), AuditLogModel.deleteMany({})]);
 });
 
-const rawTrigger = (client: ApiClient, body: object) => client.request("POST", "/emergencies", body);
+const rawTrigger = async (client: ApiClient, body: object) => client.request("POST", "/emergencies", { twoFactorCode: await client.code(), ...body });
 
 /** What the console does: a real alert goes through the confirmation step first, a test does not. */
 async function trigger(client: ApiClient, body: { testMode?: boolean }) {

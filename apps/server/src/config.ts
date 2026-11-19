@@ -49,6 +49,21 @@ const schema = z.object({
   /** Per minute and per address: a waiting device checks every few seconds, and several screens may share an address. */
   ENROLL_STATUS_RATE_LIMIT: z.coerce.number().int().positive().default(120),
 
+  // Password sign-in attempts per address per 15 minutes (the second-factor step allows twice as many).
+  LOGIN_RATE_LIMIT: z.coerce.number().int().positive().default(10),
+
+  // Two-factor authentication. The key encrypts the authenticator secrets at rest (32 random bytes, base64); it is a mounted
+  // secret and required in production. Admins must have two-factor before they can use the console unless this is turned off.
+  TWO_FACTOR_KEY: z
+    .string()
+    .optional()
+    .refine((k) => !k || Buffer.from(k, "base64").length === 32, "TWO_FACTOR_KEY must be 32 bytes, base64 encoded"),
+  TWO_FACTOR_ISSUER: z.string().trim().min(1).max(40).default("Smart Campus"),
+  REQUIRE_ADMIN_2FA: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+
   // Time zone of the campus: schedules ("every day at 08:00") and the reservations day are read in it.
   CAMPUS_TIMEZONE: z
     .string()
@@ -105,6 +120,7 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !
 
 export const config = schema.parse(env);
 export const isProd = config.NODE_ENV === "production";
+if (isProd && !config.TWO_FACTOR_KEY) throw new Error("TWO_FACTOR_KEY is required in production: it encrypts the authenticator secrets (32 random bytes, base64)");
 
 /** Origins the console is served from: APP_URL plus ALLOWED_ORIGINS, compared as `scheme://host:port`. */
 const consoleOrigins = new Set([config.APP_URL, ...config.ALLOWED_ORIGINS].map((url) => new URL(url).origin));

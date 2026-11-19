@@ -49,3 +49,16 @@ export function sameOriginGuard(req: Request, _res: Response, next: NextFunction
   }
   next();
 }
+
+/**
+ * Administrators must have two-factor authentication before they use anything but the pages to set it up. Enforced here,
+ * not in the console: a console that forgot to ask would otherwise leave the account protected by a password alone.
+ */
+export function enforceAdminTwoFactor(req: Request, _res: Response, next: NextFunction) {
+  const user = req.user;
+  const exempt = req.originalUrl.startsWith("/api/auth");
+  if (user && !exempt && user.twoFactor.required && !user.twoFactor.enabled) {
+    throw new HttpError(403, "Administrators must set up two-factor authentication first.", "two_factor_setup_required");
+  }
+  next();
+}

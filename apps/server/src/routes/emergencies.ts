@@ -2,12 +2,14 @@ import { EMERGENCY_CATALOGUE, EMERGENCY_KINDS, END_NOTICE_SECONDS } from "@smart
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../auth/middleware.js";
+import { requireCodeFor } from "../auth/twoFactor.js";
 import { clearEmergency, deliveryOfEmergency, requestConfirmation, triggerEmergency } from "../domain/emergencies.js";
 import { MAX_SPEECH_CHARS } from "../domain/intercom.js";
 import { targetsInput } from "../domain/targeting.js";
 import { HttpError } from "../lib/errors.js";
 import { pagination } from "../lib/http.js";
 import { EmergencyModel } from "../models/emergency.js";
+import { UserModel } from "../models/user.js";
 
 /** Emergency alerts. Everyone signed in reads, admins and operators trigger and clear. */
 export const emergenciesRouter = Router();
@@ -86,8 +88,16 @@ emergenciesRouter.post("/confirmations", canWrite, async (req, res) => {
   res.status(201).json(await requestConfirmation(emergencyInput.parse(req.body), req.user!));
 });
 
+/**
+ * Starting an alert, real or test, needs a fresh code from the person's authenticator app, on top of their session: a
+ * stolen session or an unlocked console is not enough to sound an alarm across the campus. A person without two-factor
+ * cannot start one at all. Ending an alert needs none: taking an alarm off the screens must never be slowed down.
+ */
 emergenciesRouter.post("/", canWrite, async (req, res) => {
-  const input = emergencyInput.extend({ confirmation: z.string().min(1).max(200).optional() }).parse(req.body);
+  const { twoFactorCode, ...input } = emergencyInput.extend({ confirmation: z.string().min(1).max(200).optional(), twoFactorCode: z.string().trim().max(8).optional() }).parse(req.body);
+  const user = await UserModel.findById(req.user!.id);
+  if (!user) throw new HttpError(401, "Not authenticated");
+  await requireCodeFor(user, input.testMode ? "start an emergency test" : "start an emergency alert", twoFactorCode);
   const emergency = await triggerEmergency(input, req.user!);
   res.status(201).json(dto(emergency));
 });
