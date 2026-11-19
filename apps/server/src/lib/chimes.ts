@@ -1,77 +1,49 @@
 import { readWav, writeWav, type PcmWav } from "./wav.js";
 
 /**
- * Chimes played before a voice announcement, by severity. They were designed from two reference recordings (spectral analysis
- * of the announcements and the chimes before them), so each severity keeps the character of its example:
+ * Chimes played before a voice announcement, by severity. They were designed from the reference sounds in
+ * `docs/inspiration/chimes` (measured pitch, partials, rhythm and level of each), as new sounds with the same character:
  *
- * - info: a soft double "ding", one pitch struck twice 0.5 s apart (F#4 with its 3rd and 5th harmonics, a hollow glassy tone
- *   that dies in about half a second). Quiet: about -12 dBFS at the peak.
- * - important: two bells rising, a deep one (G3 with partials near 724, 891 and 1264 Hz) and then a bright one (G4 with partials
- *   near 658, 927, 1100 and 1979 Hz). About -7 dBFS.
- * - urgent: the bright bell struck three times in a row, then left to ring. About -3 dBFS.
+ * - info: two soft sine blips, a rising fifth ("doo-oop"), each with a little third harmonic and a gentle fall. Quiet, about -9 dBFS.
+ * - important (the "warning" family): two held "da-da" tones on E5, 0.54 s apart, with the shimmer of a 27 Hz side partial and
+ *   bright upper partials. About -5 dBFS.
+ * - urgent (the "critical" family): a bright stab that drops into a harsh buzz, "dee-BUZZ": a sawtooth near 235 Hz, chopped
+ *   14 times a second. About -1 dBFS.
+ * - override ("manual override"): two clean beeps on A4, a pure tone with its third harmonic. About -3.5 dBFS.
+ * - important-override ("important manual override"): a busy figure of bells, E5, C5, a bright dyad, then a low tail. About -1 dBFS.
  *
  * A louder chime means a more serious announcement. The chime is generated here, at the sample rate of the voice it precedes,
  * and joined to it, so a door unit or a Faculty screen just plays one file and needs to know nothing about chimes.
  */
-export const CHIME_LEVELS = ["info", "important", "urgent"] as const;
+export const CHIME_LEVELS = ["info", "important", "urgent", "override", "important-override"] as const;
 export type ChimeLevel = (typeof CHIME_LEVELS)[number];
 
-/** One struck tone: a set of partials (frequency, relative level, seconds to fall by 60 dB) and when it is hit. */
+/** One tone of a note: a frequency in Hz and its level relative to the strongest. */
 interface Partial {
   hz: number;
   gain: number;
-  decay: number;
-}
-interface Strike {
-  at: number;
-  partials: Partial[];
-  /** Relative loudness of this strike. */
-  level: number;
 }
 
-const DING: Partial[] = [
-  { hz: 370, gain: 1, decay: 0.7 },
-  { hz: 740, gain: 0.12, decay: 0.4 },
-  { hz: 1110, gain: 0.55, decay: 0.45 },
-  { hz: 1849, gain: 0.4, decay: 0.35 },
-];
-/*
- * The bells of the reference are rough, FM-like tones: next to each main partial there are side partials at a fixed spacing
- * (about 71 Hz around the low bell, 172 Hz around the bright one), which gives them their metallic buzz. The levels below are
- * the ones measured in the recordings, relative to the strongest partial.
- */
-const LOW_BELL: Partial[] = [
-  { hz: 194, gain: 1, decay: 1.1 },
-  { hz: 265, gain: 0.65, decay: 0.9 },
-  { hz: 336, gain: 0.09, decay: 0.6 },
-  { hz: 582, gain: 0.26, decay: 0.7 },
-  { hz: 653, gain: 0.19, decay: 0.7 },
-  { hz: 724, gain: 0.46, decay: 0.8 },
-  { hz: 795, gain: 0.09, decay: 0.6 },
-  { hz: 892, gain: 0.37, decay: 0.8 },
-  { hz: 1235, gain: 0.12, decay: 0.6 },
-  { hz: 1264, gain: 0.64, decay: 0.8 },
-  { hz: 1335, gain: 0.12, decay: 0.6 },
-  { hz: 2796, gain: 0.1, decay: 0.4 },
-  { hz: 2866, gain: 0.1, decay: 0.4 },
-];
-const HIGH_BELL: Partial[] = [
-  { hz: 392, gain: 0.3, decay: 1.3 },
-  { hz: 659, gain: 1, decay: 1.2 },
-  { hz: 682, gain: 0.15, decay: 0.8 },
-  { hz: 927, gain: 0.3, decay: 1 },
-  { hz: 1100, gain: 0.6, decay: 1.1 },
-  { hz: 1271, gain: 0.22, decay: 0.9 },
-  { hz: 1444, gain: 0.16, decay: 0.8 },
-  { hz: 1537, gain: 0.19, decay: 0.8 },
-  { hz: 1714, gain: 0.13, decay: 0.7 },
-  { hz: 1979, gain: 0.3, decay: 0.8 },
-  { hz: 2420, gain: 0.12, decay: 0.5 },
-  { hz: 2860, gain: 0.11, decay: 0.5 },
-];
+/** A tone that starts at `at`, is held for `hold` seconds and fades out over `release`. */
+interface Note {
+  at: number;
+  hold: number;
+  partials: Partial[];
+  /** Level of the note in the chime. */
+  level?: number;
+  /** Seconds to rise to full level. */
+  attack?: number;
+  /** Seconds to fall by 60 dB while held; left out, the level stays steady. */
+  decay?: number;
+  release?: number;
+  /** Chops the note in level `hz` times a second, `depth` between 0 and 1. */
+  chop?: { hz: number; depth: number };
+  /** Share of soft noise (breath) mixed in, between 0 and 1. */
+  breath?: number;
+}
 
 interface Design {
-  strikes: Strike[];
+  notes: Note[];
   /** Length of the chime and of the pause before the voice, in seconds. */
   length: number;
   pause: number;
@@ -79,15 +51,108 @@ interface Design {
   peak: number;
 }
 
-const DESIGNS: Record<ChimeLevel, Design> = {
-  info: { strikes: [{ at: 0, partials: DING, level: 0.85 }, { at: 0.51, partials: DING, level: 1 }], length: 1.2, pause: 0.35, peak: 0.25 },
-  important: { strikes: [{ at: 0, partials: LOW_BELL, level: 1 }, { at: 0.66, partials: HIGH_BELL, level: 1 }], length: 1.9, pause: 0.25, peak: 0.45 },
-  urgent: { strikes: [0, 0.27, 0.54].map((at, i) => ({ at, partials: HIGH_BELL, level: 0.85 + 0.075 * i })), length: 1.8, pause: 0.2, peak: 0.7 },
-};
+/** A tone and the 3rd harmonic that gives the reference blips their rounded, slightly hollow sound. */
+const soft = (hz: number): Partial[] => [
+  { hz, gain: 1 },
+  { hz: hz * 2, gain: 0.08 },
+  { hz: hz * 3, gain: 0.45 },
+];
 
-const ATTACK_SECONDS = 0.004;
-/** The short noise burst of a strike, which is what makes a tone sound struck and not played. */
-const TRANSIENT_SECONDS = 0.018;
+/**
+ * The tone of the "da-da" warning: E5 with the bright partials measured in the reference (1103, 1710, 1978 and 932 Hz) and
+ * the side partials about 27 Hz either side that make it shimmer.
+ */
+const shimmer = (hz: number): Partial[] => [
+  { hz, gain: 1 },
+  { hz: hz - 27, gain: 0.17 },
+  { hz: hz + 27, gain: 0.22 },
+  { hz: hz - 55, gain: 0.1 },
+  { hz: hz + 60, gain: 0.14 },
+  { hz: hz * 1.676, gain: 0.36 },
+  { hz: hz * 1.41, gain: 0.12 },
+  { hz: hz * 2.6, gain: 0.21 },
+  { hz: hz * 3.01, gain: 0.15 },
+];
+
+/** A harsh sawtooth: every harmonic of `hz` up to 8 kHz, weaker as they climb, with the 2nd and 6th stressed as in the reference. */
+function sawtooth(hz: number): Partial[] {
+  const partials: Partial[] = [];
+  for (let k = 1; k * hz < 8000; k++) partials.push({ hz: hz * k, gain: (1 / k) * (k === 2 || k === 6 ? 2.2 : 1) });
+  return partials;
+}
+
+/** The bright stab at the start of the critical sound, from the measured partials 1267, 1250, 895, 733 and 654 Hz. */
+const STAB: Partial[] = [
+  { hz: 1267, gain: 1 },
+  { hz: 1250, gain: 0.8 },
+  { hz: 895, gain: 0.72 },
+  { hz: 733, gain: 0.33 },
+  { hz: 654, gain: 0.2 },
+  { hz: 266, gain: 0.35 },
+];
+
+const DESIGNS: Record<ChimeLevel, Design> = {
+  info: {
+    notes: [
+      { at: 0, hold: 0.12, partials: soft(293.7), attack: 0.012, decay: 0.45, release: 0.2, breath: 0.03 },
+      { at: 0.3, hold: 0.12, partials: soft(440), attack: 0.012, decay: 0.55, release: 0.45, breath: 0.03, level: 0.9 },
+    ],
+    length: 1.3,
+    pause: 0.35,
+    peak: 0.35,
+  },
+  important: {
+    notes: [
+      { at: 0, hold: 0.4, partials: shimmer(659.3), attack: 0.03, release: 0.1 },
+      { at: 0.54, hold: 0.4, partials: shimmer(659.3), attack: 0.03, release: 0.2, level: 1.05 },
+    ],
+    length: 1.3,
+    pause: 0.25,
+    peak: 0.55,
+  },
+  urgent: {
+    notes: [
+      { at: 0, hold: 0.2, partials: STAB, attack: 0.004, release: 0.05 },
+      { at: 0.22, hold: 0.68, partials: sawtooth(235.5), attack: 0.01, decay: 3, release: 0.12, chop: { hz: 14, depth: 0.35 } },
+    ],
+    length: 1.1,
+    pause: 0.15,
+    peak: 0.9,
+  },
+  override: {
+    notes: [
+      { at: 0, hold: 0.34, partials: soft(440), attack: 0.006, release: 0.02 },
+      { at: 0.46, hold: 0.24, partials: soft(440), attack: 0.006, release: 0.02 },
+    ],
+    length: 0.9,
+    pause: 0.25,
+    peak: 0.67,
+  },
+  "important-override": {
+    notes: [
+      { at: 0, hold: 0.22, partials: shimmer(659.3), attack: 0.01, release: 0.04 },
+      { at: 0.27, hold: 0.13, partials: shimmer(523.3), attack: 0.01, release: 0.04 },
+      {
+        at: 0.45,
+        hold: 0.32,
+        partials: [
+          { hz: 1262, gain: 1 },
+          { hz: 1235, gain: 0.26 },
+          { hz: 1290, gain: 0.26 },
+          { hz: 892, gain: 0.74 },
+          { hz: 659, gain: 0.54 },
+        ],
+        attack: 0.008,
+        release: 0.05,
+        chop: { hz: 27, depth: 0.2 },
+      },
+      { at: 0.82, hold: 0.2, partials: [...soft(325), ...soft(217).map((p) => ({ ...p, gain: p.gain * 0.5 }))], attack: 0.01, decay: 0.8, release: 0.2, level: 0.8 },
+    ],
+    length: 1.4,
+    pause: 0.2,
+    peak: 0.88,
+  },
+};
 
 /** A fixed noise source: chimes must sound the same every time, and tests must be able to compare them. */
 function noise(seed: number) {
@@ -107,18 +172,23 @@ export function renderChime(level: ChimeLevel, sampleRate: number): Float32Array
   const design = DESIGNS[level];
   const out = new Float32Array(Math.round(design.length * sampleRate));
   const random = noise(level.length * 7919);
-  for (const strike of design.strikes) {
-    const start = Math.round(strike.at * sampleRate);
-    for (let i = 0; start + i < out.length; i++) {
+  for (const note of design.notes) {
+    const start = Math.round(note.at * sampleRate);
+    const attack = note.attack ?? 0.005;
+    const release = note.release ?? 0.05;
+    const total = note.hold + release;
+    const strongest = note.partials.reduce((m, p) => m + p.gain, 0) || 1;
+    for (let i = 0; start + i < out.length && i / sampleRate < total; i++) {
       const t = i / sampleRate;
-      const attack = Math.min(1, t / ATTACK_SECONDS);
+      let envelope = Math.min(1, t / attack);
+      if (note.decay) envelope *= Math.exp((-6.9 * t) / note.decay);
+      if (t > note.hold) envelope *= Math.max(0, 1 - (t - note.hold) / release);
+      if (note.chop) envelope *= 1 - note.chop.depth / 2 + (note.chop.depth / 2) * Math.sin(2 * Math.PI * note.chop.hz * t);
       let value = 0;
-      for (const p of strike.partials) {
-        // 60 dB of fall in `decay` seconds: exp(-6.9 t / decay).
-        value += p.gain * Math.exp((-6.9 * t) / p.decay) * Math.sin(2 * Math.PI * p.hz * t);
-      }
-      if (t < TRANSIENT_SECONDS) value += 0.6 * random() * (1 - t / TRANSIENT_SECONDS);
-      out[start + i]! += strike.level * attack * value;
+      for (const p of note.partials) value += p.gain * Math.sin(2 * Math.PI * p.hz * t);
+      value /= strongest;
+      if (note.breath) value += note.breath * random();
+      out[start + i]! += (note.level ?? 1) * envelope * value;
     }
   }
   // Fade the end so the chime never ends on a click.

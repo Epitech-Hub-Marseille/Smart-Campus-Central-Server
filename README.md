@@ -74,12 +74,14 @@ decision, so the shipped implementation speaks the OpenAI `POST /audio/speech` A
   If the container falls back to CPU or fails on an older GPU, see its logs: the image's CUDA build must support your card.
 - The text is limited to 1000 characters and synthesis is rate-limited per person (20 a minute). The reply must really be audio (sniffed)
   and not larger than `MAX_AUDIO_MB`. The engine's error text is never passed to the console.
-- **Chimes.** A voice can start with a chime that tells how serious the announcement is (`chime`: `info`, `important` or `urgent`, in the InterCom form
-  and in scheduled voice content). They were designed from two reference recordings and get louder with the severity: *info* is a soft double ding
-  (F#4 with its odd harmonics, struck twice, about -12 dBFS), *important* is two bells rising, a deep one then a bright one (about -7 dBFS), *urgent*
-  is the bright bell struck three times (about -3 dBFS). They are generated in `lib/chimes.ts` (nothing stored) and joined to the voice on the server, so
-  the devices play one file and need no change. To join them without a decoder the server asks the engine for `wav`; an engine that does not return a
-  16-bit PCM WAV gets its voice sent as it is, with a warning in the log. `GET /api/intercom/chimes/:level` returns a chime alone to pre-listen to.
+- **Chimes.** A voice can start with a chime that tells how serious the announcement is (`chime` in the InterCom form and in scheduled voice content).
+  They are new sounds with the character of the references in `docs/inspiration/chimes` (pitch, partials, rhythm and level were measured on each):
+  `info` is two soft sine blips, a rising fifth (about -9 dBFS); `important` is a held "da-da" on E5 with a 27 Hz shimmer (-5 dBFS); `urgent` is a bright
+  stab that drops into a harsh buzz, a sawtooth near 235 Hz chopped 14 times a second (-1 dBFS); `override` is two clean beeps on A4 (-3.5 dBFS) and
+  `important-override` a busy figure of bells that ends on a low tail (-1 dBFS), for manual broadcasts. The more serious, the louder. They are generated in
+  `lib/chimes.ts` (nothing stored) and joined to the voice on the server, so the devices play one file and need no change. To join them without a
+  decoder the server asks the engine for `wav`; an engine that does not return a 16-bit PCM WAV gets its voice sent as it is, with a warning in the
+  log. `GET /api/intercom/chimes/:level` returns a chime alone to pre-listen to.
 
 **Schedules** (`/schedules`, admins and operators). A schedule announces a text (on screens) or a voice, at a time or on an event:
 
