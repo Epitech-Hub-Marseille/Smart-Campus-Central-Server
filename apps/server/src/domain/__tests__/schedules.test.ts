@@ -209,6 +209,20 @@ describe("running schedules", () => {
     expect(await CommandModel.countDocuments({ deviceId, type: "audio.play" })).toBe(1);
   });
 
+  it("a voice schedule with a chime asks for audio it can put the chime in front of, and refuses an unknown severity", async () => {
+    const engine = fakeEngine({ pcm16: true });
+    setTtsEngine(engine);
+    const { deviceId } = await h.enrollDevice();
+    const body = { name: "Chimed", content: { kind: "voice", text: "Bonjour", voice: "nova", chime: "important" }, trigger: { type: "daily", time: "08:00" }, targets: { devices: [deviceId] } };
+    const res = await create(body);
+    expect(res.status).toBe(201);
+    expect(res.body.content.chime).toBe("important");
+    await ScheduleModel.updateOne({ scheduleId: res.body.id }, { $set: { nextRunAt: minutes(-1) } });
+    await runDueSchedules();
+    expect(engine.calls[0]).toMatchObject({ format: "wav" });
+    expect((await create({ ...body, name: "Loud", content: { ...body.content, chime: "deafening" } })).status).toBe(400);
+  });
+
   it("runs now on request and rejects a status schedule, which has no fixed screens", async () => {
     const { id } = await dueSchedule();
     const next = (await ScheduleModel.findOne({ scheduleId: id }))!.nextRunAt;

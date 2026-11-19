@@ -1,6 +1,7 @@
 import { ulid } from "@smartcampus/protocol";
 import { HttpError } from "../lib/errors.js";
 import { sniffAudio } from "../lib/audioSniff.js";
+import { prependChime, type ChimeLevel } from "../lib/chimes.js";
 import { recordAudit } from "../lib/audit.js";
 import { AnnouncementModel } from "../models/announcement.js";
 import { config } from "../config.js";
@@ -69,6 +70,8 @@ export interface SpeechInput {
   voice?: string;
   /** Pace, 1 being natural. */
   speed?: number;
+  /** A chime played before the voice, by severity. Left out for none. */
+  chime?: ChimeLevel;
 }
 
 /**
@@ -90,10 +93,27 @@ function pickVoice(input: SpeechInput) {
   return { engine, voice };
 }
 
+/**
+ * The voice with its chime in front. An engine that does not return a 16-bit WAV when asked cannot be joined to a chime
+ * without a decoder, so the voice goes out as it is: an announcement without its chime is better than none.
+ */
+function withChime(spoken: Buffer, level: ChimeLevel): Buffer {
+  const joined = prependChime(spoken, level);
+  if (!joined) console.warn(`chime "${level}" skipped: the text-to-speech engine did not return a 16-bit WAV`);
+  return joined ?? spoken;
+}
+
 /** Generates the audio for a text without storing or sending it: the pre-listening step. */
 export async function previewSpeech(input: SpeechInput): Promise<{ data: Buffer; mime: string }> {
   const { engine, voice } = pickVoice(input);
-  const data = await engine.synthesize({ text: input.text, voice: voice.id, language: voice.language, ...(input.speed !== undefined && { speed: input.speed }) });
+  const spoken = await engine.synthesize({
+    text: input.text,
+    voice: voice.id,
+    language: voice.language,
+    ...(input.speed !== undefined && { speed: input.speed }),
+    ...(input.chime && { format: "wav" as const }),
+  });
+  const data = input.chime ? withChime(spoken, input.chime) : spoken;
   const format = sniffAudio(data);
   if (!format) throw new HttpError(502, "The text-to-speech engine returned something that is not audio");
   return { data, mime: format.mime };

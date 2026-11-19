@@ -10,6 +10,7 @@ import { DeviceModel } from "../models/device.js";
 import { RoomStatusModel } from "../models/roomStatus.js";
 import { ScheduleModel } from "../models/schedule.js";
 import { createAnnouncement } from "./announcements.js";
+import { CHIME_LEVELS, type ChimeLevel } from "../lib/chimes.js";
 import { MAX_SPEECH_CHARS, speak } from "./intercom.js";
 import { targetsInput, type Targets } from "./targeting.js";
 
@@ -44,6 +45,8 @@ const contentInput = z
     text: z.string().trim().min(1).max(2000),
     priority: z.enum(ANNOUNCE_PRIORITIES).default("info"),
     voice: z.string().trim().max(60).default(""),
+    // Voice only: the chime played before the voice, by severity.
+    chime: z.enum(CHIME_LEVELS).optional(),
     expiresAfterMinutes: z.number().int().min(1).max(10_080).optional(),
   })
   .strict();
@@ -172,7 +175,7 @@ export async function executeSchedule(schedule: ScheduleDoc, context: { roomId?:
     if (!targets) throw new HttpError(400, "This schedule has no targets");
     const content = schedule.content;
     if (content.kind === "voice") {
-      await speak({ text: content.text, voice: content.voice || undefined, title: content.title || undefined, targets }, actor);
+      await speak({ text: content.text, voice: content.voice || undefined, title: content.title || undefined, chime: (content.chime as ChimeLevel | undefined) || undefined, targets }, actor);
     } else {
       await createAnnouncement(
         {
