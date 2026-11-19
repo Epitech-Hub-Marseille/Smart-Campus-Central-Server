@@ -9,6 +9,8 @@ const themeSchema = new Schema(
     tokens: { type: Schema.Types.Mixed, default: {} },
     // Font files by slot (body, heading, mono): ids of assets of kind "font".
     fonts: { type: Schema.Types.Mixed, default: {} },
+    // How an alert is dressed (see `emergencyTheme` in the protocol). Empty: the default alert.
+    emergency: { type: Schema.Types.Mixed, default: {} },
     css: { type: String, default: "" },
     // Rises with every edit, so a device can tell it has the latest.
     version: { type: Number, default: 1 },

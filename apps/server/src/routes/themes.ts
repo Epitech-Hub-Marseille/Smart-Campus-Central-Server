@@ -1,4 +1,4 @@
-import { THEME_COLORS, THEME_FONT_SLOTS, THEME_FONTS, THEME_LIMITS, themeInput } from "@smartcampus/protocol";
+import { EMERGENCY_FRAMES, EMERGENCY_MIN_CONTRAST, THEME_COLORS, THEME_FONT_SLOTS, THEME_FONTS, THEME_LIMITS, themeInput } from "@smartcampus/protocol";
 import express, { Router } from "express";
 import { requireAuth, requireRole, requireSession } from "../auth/middleware.js";
 import { BUNDLE_LIMITS } from "../lib/themeBundle.js";
@@ -12,7 +12,7 @@ themesRouter.use(requireAuth, requireSession, requireRole("admin", "operator"));
 
 /** What a theme can hold, so the console never keeps a copy that could drift. */
 themesRouter.get("/schema", (_req, res) => {
-  res.json({ colors: THEME_COLORS, fonts: THEME_FONTS, fontSlots: THEME_FONT_SLOTS, limits: THEME_LIMITS });
+  res.json({ colors: THEME_COLORS, fonts: THEME_FONTS, fontSlots: THEME_FONT_SLOTS, emergencyFrames: EMERGENCY_FRAMES, emergencyMinContrast: EMERGENCY_MIN_CONTRAST, limits: THEME_LIMITS });
 });
 
 themesRouter.get("/", async (_req, res) => {

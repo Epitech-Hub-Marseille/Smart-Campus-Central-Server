@@ -1,4 +1,4 @@
-import { THEME_FONT_SLOTS, themeInput, themeTokens, type ThemeFontSlot, type ThemeSpec } from "@smartcampus/protocol";
+import { THEME_FONT_SLOTS, emergencyTheme, themeInput, type EmergencyTheme, themeTokens, type ThemeFontSlot, type ThemeSpec } from "@smartcampus/protocol";
 import { z } from "zod";
 import { recordAudit } from "../lib/audit.js";
 import { HttpError } from "../lib/errors.js";
@@ -41,12 +41,20 @@ const fontRefsOf = (theme: ThemeDoc, fonts: Map<string, ReturnType<typeof assetR
   return refs;
 };
 
+/** The alert settings to send: nothing when they are the defaults, so a theme that does not dress alerts says nothing about them. */
+function alertOf(theme: ThemeDoc): { emergency?: EmergencyTheme } {
+  const settings = emergencyTheme.parse(theme.emergency ?? {});
+  const dressed = settings.fonts || settings.frame !== "stripes" || settings.radius !== undefined || Object.keys(settings.colors).length > 0;
+  return dressed ? { emergency: settings } : {};
+}
+
 const specOf = (theme: ThemeDoc, deviceType: string, fonts: Map<string, ReturnType<typeof assetRefOf>>): ThemeSpec => ({
   id: theme.themeId,
   name: theme.name,
   version: theme.version,
   tokens: themeTokens.parse(theme.tokens ?? {}),
   fonts: fontRefsOf(theme, fonts),
+  ...alertOf(theme),
   // CSS is for the web-based Faculty screens; a door unit would only carry bytes it cannot use.
   ...(deviceType === "display" && theme.css && { css: theme.css }),
 });
@@ -156,8 +164,8 @@ export async function importThemeBundle(zip: Buffer, actor: Actor, replace: bool
   const bundle = readThemeBundle(zip);
   for (const font of bundle.fonts) if (!sniffFont(font.data)) throw new HttpError(415, `${font.name} is not a WOFF2, WOFF, TTF or OTF font`);
 
-  const { name, description, tokens, css } = bundle.theme;
-  const draft = { name, description, tokens, css: typeof css === "string" ? css : (bundle.css ?? "") };
+  const { name, description, tokens, css, emergency } = bundle.theme;
+  const draft = { name, description, tokens, emergency, css: typeof css === "string" ? css : (bundle.css ?? "") };
   // The fonts do not have ids yet: a placeholder lets the same schema judge everything else first.
   const placeholders = Object.fromEntries(bundle.fonts.map((f) => [f.slot, "pending"]));
   themeInput.parse({ ...draft, fonts: placeholders });
@@ -204,6 +212,7 @@ export const themeDto = (t: ThemeDoc) => ({
   description: t.description ?? "",
   tokens: t.tokens ?? {},
   fonts: fontIdsOf(t),
+  emergency: t.emergency ?? {},
   css: t.css ?? "",
   version: t.version,
   createdBy: t.createdByName,

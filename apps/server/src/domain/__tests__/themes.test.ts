@@ -277,3 +277,38 @@ describe("theme bundles", () => {
   });
 });
 
+describe("emergency theming", () => {
+  const dressed = { fonts: true, frame: "bar", radius: 2, colors: { background: "#001070", card: "#0a1a8a" } };
+
+  it("keeps a closed, validated set, and refuses a background white text could not be read on", async () => {
+    const make = (emergency: object) => operator.request("POST", "/themes", { name: `T${Math.random()}`, tokens: tokens(), emergency });
+    const ok = await make(dressed);
+    expect(ok.status).toBe(201);
+    expect(ok.body.emergency).toMatchObject(dressed);
+    expect((await make({ colors: { background: "#ffffff" } })).status).toBe(400);
+    expect((await make({ colors: { accent: "#000000" } })).status).toBe(400);
+    expect((await make({ frame: "disco" })).status).toBe(400);
+    expect((await make({ css: "a { display: none }" })).status).toBe(400);
+    expect((await operator.request("GET", "/themes/schema")).body).toMatchObject({ emergencyFrames: ["stripes", "bar"], emergencyMinContrast: 4.5 });
+  });
+
+  it("is sent to the devices that wear the theme, and nothing about alerts is sent when the theme has none", async () => {
+    const plain = await theme("Plain");
+    const branded = await theme("Branded", { emergency: dressed });
+    const door = await h.enrollDevice({ type: "door" });
+    await assign("device", door.deviceId, plain.id);
+    expect(((await latest(door.deviceId))?.theme as any).emergency).toBeUndefined();
+    await assign("device", door.deviceId, branded.id);
+    expect(((await latest(door.deviceId))?.theme as any).emergency).toMatchObject(dressed);
+  });
+
+  it("comes with a theme bundle", async () => {
+    const zip = Buffer.from(zipSync({ "theme.json": strToU8(JSON.stringify({ name: "Bundle", tokens: tokens(), emergency: dressed })) }));
+    const res = await operator.raw("POST", "/themes/import", { body: zip, headers: { "content-type": "application/zip" } });
+    expect(res.status).toBe(201);
+    expect((await res.json()).theme.emergency).toMatchObject(dressed);
+    const bad = Buffer.from(zipSync({ "theme.json": strToU8(JSON.stringify({ name: "Bad", tokens: tokens(), emergency: { colors: { background: "#ffffff" } } })) }));
+    expect((await operator.raw("POST", "/themes/import", { body: bad, headers: { "content-type": "application/zip" } })).status).toBe(400);
+  });
+});
+
