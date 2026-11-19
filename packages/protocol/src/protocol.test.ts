@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONTENT_LIMITS, FACULTY_LIMITS, facultyConfig, EMERGENCY_CATALOGUE, EMERGENCY_KINDS, MAX_FRAME_BYTES, buildMessage, displayConfig, handshakeMessages, isUlid, parseDeviceMessage, parseServerMessage, ulid } from "./index.js";
+import { FACULTY_LIMITS, SCENE_LAYOUTS, TILE_KINDS, TILE_LIMITS, facultyConfig, facultyConfigPatch, mergeConfigPatches, parseYoutubeId, patchHas, sceneInput, EMERGENCY_CATALOGUE, EMERGENCY_KINDS, MAX_FRAME_BYTES, buildMessage, displayConfig, handshakeMessages, isUlid, parseDeviceMessage, parseServerMessage, ulid } from "./index.js";
 
 describe("ulid", () => {
   it("is 26 Crockford chars and sortable by time", () => {
@@ -135,13 +135,10 @@ describe("faculty and reservation messages", () => {
 
   it("fills in the faculty config defaults", () => {
     const config = facultyConfig.parse({});
-    expect(config).toMatchObject({ service: "all", carousel: { enabled: true, intervalSeconds: 15 }, widgets: { weather: false }, weather: null });
-    expect(config.carousel.slides).toEqual(["news", "staff", "reservations"]);
+    expect(config).toMatchObject({ service: "all", carousel: { enabled: true }, widgets: { weather: false }, weather: null });
   });
 
-  it("rejects a carousel that is too fast or has no slide, and a weather position off the globe", () => {
-    expect(facultyConfig.safeParse({ carousel: { intervalSeconds: 1 } }).success).toBe(false);
-    expect(facultyConfig.safeParse({ carousel: { slides: [] } }).success).toBe(false);
+  it("rejects a weather position off the globe", () => {
     expect(facultyConfig.safeParse({ weather: { latitude: 91, longitude: 0 } }).success).toBe(false);
   });
 
@@ -200,54 +197,125 @@ describe("faculty and reservation messages", () => {
   });
 });
 
-describe("custom content", () => {
+describe("screens: scenes, tiles and layered config", () => {
   const sha = "a".repeat(64);
-  const asset = (mime: string) => ({ assetId: "asset1", sha256: sha, size: 1000, mime });
-  const parse = (item: object) => parseServerMessage(JSON.stringify(buildMessage({ type: "content.set", payload: { items: [item], updatedAt: 1 } } as never, 1)));
+  const pointer = (id = "asset1") => ({ assetId: id });
+  const ref = (mime: string) => ({ assetId: "asset1", sha256: sha, size: 1000, mime });
+  const tile = (kind: string, settings: object = {}, id = `t-${kind}`) => ({ id, kind, settings });
+  const scene = (layout: string, tiles: object[], extra: object = {}) => ({ id: "s1", layout, tiles, ...extra });
+  const parseScene = (s: object) => sceneInput.safeParse(s);
+  const carousel = (scenes: object[]) => parseServerMessage(JSON.stringify(buildMessage({ type: "carousel.set", payload: { scenes, updatedAt: 1 } } as never, 1)));
+
+  it("has a layout slot count that matches each layout and a description for every kind", () => {
+    for (const layout of Object.values(SCENE_LAYOUTS)) expect(layout.tiles.length).toBeGreaterThan(0);
+    expect(new Set(TILE_KINDS.map((k) => k.kind)).size).toBe(TILE_KINDS.length);
+    for (const kind of ["news", "staff", "reservations", "image", "video", "text", "web", "radio", "stream", "youtube"]) expect(TILE_KINDS.some((k) => k.kind === kind)).toBe(true);
+  });
 
   it("accepts each kind with what it needs and fills in the defaults", () => {
-    expect(parse({ id: "1", kind: "image", asset: asset("image/png") }).ok).toBe(true);
-    expect(parse({ id: "2", kind: "video", asset: asset("video/mp4"), durationSeconds: 60, fit: "cover" }).ok).toBe(true);
-    expect(parse({ id: "3", kind: "text", text: "Open day on Saturday" }).ok).toBe(true);
-    expect(parse({ id: "4", kind: "web", url: "https://example.org/live", refreshSeconds: 60 }).ok).toBe(true);
-    const parsed = parse({ id: "1", kind: "image", asset: asset("image/png") });
-    expect(parsed.ok && parsed.message.type === "content.set" && parsed.message.payload.items[0]).toMatchObject({ durationSeconds: 15, fit: "contain", title: "" });
+    expect(parseScene(scene("full", [tile("news")])).success).toBe(true);
+    expect(parseScene(scene("full", [tile("image", { asset: pointer() })])).success).toBe(true);
+    const video = parseScene(scene("full", [tile("video", { asset: pointer() })]));
+    expect(video.success && video.data.tiles[0]?.settings).toMatchObject({ fit: "contain", muted: true, loop: true });
+    expect(parseScene(scene("full", [tile("radio", { url: "https://radio.example.org/live.mp3", label: "Campus radio" })])).success).toBe(true);
+    expect(parseScene(scene("full", [tile("stream", { url: "https://cam.example.org/live.m3u8", format: "hls" })])).success).toBe(true);
+    expect(parseScene(scene("full", [tile("web", { url: "https://example.org/live" })])).success).toBe(true);
+    expect(parseScene(scene("full", [tile("text", { text: "Open day on Saturday" })])).success).toBe(true);
   });
 
-  it("refuses a slide that lacks what its kind needs, or that carries the wrong kind of file", () => {
-    expect(parse({ id: "1", kind: "image" }).ok).toBe(false);
-    expect(parse({ id: "1", kind: "image", asset: asset("video/mp4") }).ok).toBe(false);
-    expect(parse({ id: "1", kind: "video", asset: asset("image/png") }).ok).toBe(false);
-    expect(parse({ id: "1", kind: "text" }).ok).toBe(false);
-    expect(parse({ id: "1", kind: "web" }).ok).toBe(false);
+  it("refuses a tile that lacks what its kind needs, an unknown kind, or an address that is not http(s)", () => {
+    expect(parseScene(scene("full", [tile("image")])).success).toBe(false);
+    expect(parseScene(scene("full", [tile("text")])).success).toBe(false);
+    expect(parseScene(scene("full", [tile("hologram")])).success).toBe(false);
+    expect(parseScene(scene("full", [tile("web", { url: "javascript:alert(1)" })])).success).toBe(false);
+    expect(parseScene(scene("full", [tile("stream", { url: "file:///etc/passwd" })])).success).toBe(false);
+    expect(parseScene(scene("full", [tile("radio", { url: "rtsp://x/y" })])).success).toBe(false);
   });
 
-  it("refuses addresses that are not http(s), a bad hash, silly durations and a window that ends before it starts", () => {
-    expect(parse({ id: "1", kind: "web", url: "javascript:alert(1)" }).ok).toBe(false);
-    expect(parse({ id: "1", kind: "web", url: "file:///etc/passwd" }).ok).toBe(false);
-    expect(parse({ id: "1", kind: "image", asset: { ...asset("image/png"), sha256: "xyz" } }).ok).toBe(false);
-    expect(parse({ id: "1", kind: "text", text: "x", durationSeconds: 1 }).ok).toBe(false);
-    expect(parse({ id: "1", kind: "text", text: "x", durationSeconds: 601 }).ok).toBe(false);
-    expect(parse({ id: "1", kind: "text", text: "x", startsAt: 2000, endsAt: 1000 }).ok).toBe(false);
+  it("needs exactly as many tiles as the layout has slots", () => {
+    expect(parseScene(scene("full", [tile("news"), tile("staff", {}, "t2")])).success).toBe(false);
+    expect(parseScene(scene("columns", [tile("news")])).success).toBe(false);
+    expect(parseScene(scene("quad", [tile("news", {}, "a"), tile("staff", {}, "b"), tile("reservations", {}, "c"), tile("text", { text: "hi" }, "d")])).success).toBe(true);
   });
 
-  it("a full playlist of the longest items still fits a frame", () => {
-    const longText = "é".repeat(CONTENT_LIMITS.text);
-    const items = Array.from({ length: CONTENT_LIMITS.items }, (_, i) =>
-      i % 2 ? { id: ulid(), kind: "text" as const, title: "é".repeat(CONTENT_LIMITS.title), text: longText, startsAt: 1, endsAt: 2 } : { id: ulid(), kind: "web" as const, title: "é".repeat(CONTENT_LIMITS.title), url: `https://example.org/${"a".repeat(CONTENT_LIMITS.url - 21)}`, refreshSeconds: 60 },
-    );
-    const frame = JSON.stringify(buildMessage({ type: "content.set", payload: { items, updatedAt: Date.now() } }, 1));
+  it("takes a YouTube address in any form and keeps the id", () => {
+    expect(parseYoutubeId("dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+    expect(parseYoutubeId("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=3")).toBe("dQw4w9WgXcQ");
+    expect(parseYoutubeId("https://youtu.be/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+    expect(parseYoutubeId("https://www.youtube.com/live/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+    expect(parseYoutubeId("https://evil.example/watch?v=dQw4w9WgXcQ")).toBeNull();
+    const parsed = parseScene(scene("full", [tile("youtube", { video: "https://youtu.be/dQw4w9WgXcQ" })]));
+    expect(parsed.success && parsed.data.tiles[0]?.settings).toMatchObject({ video: "dQw4w9WgXcQ", muted: true });
+    expect(parseScene(scene("full", [tile("youtube", { video: "https://example.org" })])).success).toBe(false);
+  });
+
+  it("lets only one tile of a scene make sound", () => {
+    const radio = (id: string, muted?: boolean) => tile("radio", { url: "https://r.example.org/a", ...(muted !== undefined && { muted }) }, id);
+    expect(parseScene(scene("columns", [radio("a"), radio("b")])).success).toBe(false);
+    expect(parseScene(scene("columns", [radio("a"), radio("b", true)])).success).toBe(true);
+    // A video is muted unless said otherwise, so a video beside a radio is fine.
+    expect(parseScene(scene("columns", [radio("a"), tile("video", { asset: pointer() }, "v")])).success).toBe(true);
+    expect(parseScene(scene("columns", [radio("a"), tile("video", { asset: pointer(), muted: false }, "v")])).success).toBe(false);
+  });
+
+  it("refuses a window that ends before it starts and silly durations", () => {
+    expect(parseScene(scene("full", [tile("news")], { startsAt: 2000, endsAt: 1000 })).success).toBe(false);
+    expect(parseScene(scene("full", [tile("news")], { durationSeconds: 1 })).success).toBe(false);
+    expect(parseScene(scene("full", [tile("news")], { durationSeconds: 601 })).success).toBe(false);
+  });
+
+  it("a screen gets assets as full references, checks their type, and skips a kind it does not know", () => {
+    expect(carousel([scene("full", [tile("image", { asset: ref("image/png") })])]).ok).toBe(true);
+    expect(carousel([scene("full", [tile("image", { asset: ref("video/mp4") })])]).ok).toBe(false);
+    expect(carousel([scene("full", [tile("image", { asset: { ...ref("image/png"), sha256: "xyz" } })])]).ok).toBe(false);
+    expect(carousel([scene("full", [tile("hologram", { anything: true })])]).ok).toBe(true);
+  });
+
+  it("a full carousel of the longest tiles still fits a frame", () => {
+    const text = "é".repeat(TILE_LIMITS.text);
+    const quad = (n: number) =>
+      scene("quad", [
+        tile("text", { text }, `${n}a`),
+        tile("web", { url: `https://example.org/${"a".repeat(TILE_LIMITS.url - 21)}` }, `${n}b`),
+        tile("image", { asset: ref("image/png") }, `${n}c`),
+        tile("stream", { url: `https://example.org/${"a".repeat(TILE_LIMITS.url - 21)}`, label: "é".repeat(TILE_LIMITS.label) }, `${n}d`),
+      ], { id: ulid(), name: "é".repeat(TILE_LIMITS.name), startsAt: 1, endsAt: 2 });
+    const scenes = Array.from({ length: TILE_LIMITS.tiles / 4 }, (_, i) => quad(i));
+    const frame = JSON.stringify(buildMessage({ type: "carousel.set", payload: { scenes, updatedAt: Date.now() } } as never, 1));
     expect(parseServerMessage(frame).ok).toBe(true);
     expect(Buffer.byteLength(frame) + 512).toBeLessThan(MAX_FRAME_BYTES);
-    const tooMany = [...items, items[0]!];
-    expect(parseServerMessage(JSON.stringify(buildMessage({ type: "content.set", payload: { items: tooMany, updatedAt: 1 } } as never, 1))).ok).toBe(false);
+    expect(carousel([...scenes, quad(99)]).ok).toBe(false);
+    expect(carousel(Array.from({ length: TILE_LIMITS.scenes + 1 }, (_, i) => scene("full", [tile("news")], { id: String(i) }))).ok).toBe(false);
   });
 
-  it("the faculty config carries a mode and the details of the site, with safe defaults", () => {
+  it("the faculty config has the details of the site and safe defaults", () => {
     const config = facultyConfig.parse({});
-    expect(config).toMatchObject({ mode: "default", site: { name: "", subtitle: "", zone: "", assemblyPoint: "", emergencyNumber: "", logo: null } });
-    expect(facultyConfig.parse({ mode: "mixed", site: { name: "Faculty of Engineering", logo: asset("image/png") } }).site.logo?.assetId).toBe("asset1");
-    expect(facultyConfig.safeParse({ mode: "slideshow" }).success).toBe(false);
-    expect(facultyConfig.safeParse({ site: { logo: { ...asset("image/png"), sha256: "bad" } } }).success).toBe(false);
+    expect(config).toMatchObject({ site: { name: "", subtitle: "", zone: "", assemblyPoint: "", emergencyNumber: "", logo: null } });
+    expect(facultyConfig.parse({ site: { name: "Faculty of Engineering", logo: ref("image/png") } }).site.logo?.assetId).toBe("asset1");
+    expect(facultyConfig.safeParse({ site: { logo: { ...ref("image/png"), sha256: "bad" } } }).success).toBe(false);
+  });
+
+  it("a screen's own settings win over its group's, which win over the default, field by field", () => {
+    const base = { site: { name: "Campus", subtitle: "EPITECH", logo: pointer("default-logo") }, widgets: { clock: true, weather: false }, service: "all" };
+    const group = { site: { name: "Building A" }, widgets: { weather: true } };
+    const own = { site: { logo: null }, service: "pedagogical" };
+    const merged = mergeConfigPatches([base, group, own]);
+    expect(merged).toEqual({
+      site: { name: "Building A", subtitle: "EPITECH", logo: null },
+      widgets: { clock: true, weather: true },
+      service: "pedagogical",
+    });
+    // Saying nothing inherits, saying null overrides.
+    expect(mergeConfigPatches([base, {}])).toEqual(base);
+    expect(patchHas(own, ["site", "logo"])).toBe(true);
+    expect(patchHas(own, ["site", "name"])).toBe(false);
+  });
+
+  it("a layer cannot carry fields the config does not have, or a hash it invented", () => {
+    expect(facultyConfigPatch.safeParse({ service: "pedagogical", site: { name: "A" } }).success).toBe(true);
+    expect(facultyConfigPatch.safeParse({ mode: "custom" }).success).toBe(false);
+    expect(facultyConfigPatch.safeParse({ site: { logo: { assetId: "x", sha256: "y" } } }).success).toBe(true);
+    expect(facultyConfigPatch.parse({ site: { logo: { assetId: "x", sha256: "y" } } }).site?.logo).toEqual({ assetId: "x" });
+    expect(facultyConfigPatch.safeParse({ weather: { latitude: 95, longitude: 0, label: "" } }).success).toBe(false);
   });
 });
