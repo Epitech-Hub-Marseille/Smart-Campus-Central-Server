@@ -9,6 +9,7 @@ import { NewsPage } from "@/pages/NewsPage";
 import { ScreensPage } from "@/pages/ScreensPage";
 import { ReservationsPage } from "@/pages/ReservationsPage";
 import { ApiKeysPage } from "@/pages/ApiKeysPage";
+import { ThemesPage } from "@/pages/ThemesPage";
 import { SecurityPage } from "@/pages/SecurityPage";
 import { SectionPage } from "@/pages/SectionPage";
 import { SchedulesPage } from "@/pages/SchedulesPage";
@@ -55,6 +56,7 @@ export default function App() {
                 <Route path="/schedules" element={<SchedulesPage />} />
                 <Route path="/templates" element={<TemplatesPage />} />
                 <Route path="/media" element={<MediaPage />} />
+                <Route path="/themes" element={<ThemesPage />} />
                 <Route path="/screens" element={<ScreensPage />} />
                 <Route path="/news" element={<NewsPage />} />
                 <Route path="/statuses" element={<StatusesPage />} />
