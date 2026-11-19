@@ -27,6 +27,7 @@ COMMAND_TYPES = {
     "display.config.set",
     "faculty.config.set",
     "faculty.content.set",
+    "carousel.set",
     "reservations.set",
     "audio.settings.set",
     "announce.show",
