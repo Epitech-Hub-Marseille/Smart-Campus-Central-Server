@@ -42,18 +42,17 @@ export function VoicePicker({ catalogue, language, voice, onChange, idPrefix }: 
   );
 }
 
-export type Chime = "" | "info" | "important" | "urgent" | "override" | "important-override";
+/** The id of a chime, or "" for none. The list comes from the server. */
+export type Chime = string;
 
-const CHIME_LABEL: Record<Exclude<Chime, "">, string> = {
-  info: "Info: two soft blips, rising",
-  important: "Important: a held two-tone \"da-da\"",
-  urgent: "Urgent: a bright stab and a harsh buzz",
-  override: "Manual override: two clean beeps",
-  "important-override": "Important manual override: a busy figure of bells",
-};
+interface ChimeCatalogue {
+  groups: { id: string; label: string }[];
+  chimes: { id: string; group: string; label: string }[];
+}
 
-/** The chime played before a voice, by severity, with a button to hear it. Louder means more serious. */
+/** The chime played before a voice, with a button to hear it. The louder and rougher, the more serious. */
 export function ChimePicker({ value, onChange, idPrefix }: { value: Chime; onChange: (next: Chime) => void; idPrefix: string }) {
+  const catalogue = useFetch<ChimeCatalogue>("/intercom/chimes");
   const [playing, setPlaying] = useState(false);
   function listen() {
     if (!value) return;
@@ -66,12 +65,18 @@ export function ChimePicker({ value, onChange, idPrefix }: { value: Chime; onCha
   return (
     <div className="flex flex-wrap items-end gap-3">
       <Field label="Chime before the voice" htmlFor={`${idPrefix}-chime`}>
-        <Select id={`${idPrefix}-chime`} value={value} onChange={(e) => onChange(e.target.value as Chime)}>
+        <Select id={`${idPrefix}-chime`} value={value} onChange={(e) => onChange(e.target.value)}>
           <option value="">None</option>
-          {(Object.keys(CHIME_LABEL) as Exclude<Chime, "">[]).map((level) => (
-            <option key={level} value={level}>
-              {CHIME_LABEL[level]}
-            </option>
+          {catalogue.data?.groups.map((group) => (
+            <optgroup key={group.id} label={group.label}>
+              {catalogue.data!.chimes
+                .filter((c) => c.group === group.id)
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
+            </optgroup>
           ))}
         </Select>
       </Field>
