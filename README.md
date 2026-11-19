@@ -42,6 +42,7 @@ The single `pnpm-lock.yaml` at the root is committed.
 | Devices | Console page: approve or deny connection requests from new devices, see who is online live, edit, revoke, send commands and follow their delivery, compare desired and reported state. Offline alerts. Admins and operators only |
 | Room status | Free, occupied, closed and works built in, plus custom statuses (label, colour, icon). Changing a status is stored with its history, pushed to the door screens of the room and audited |
 | Announcements | Text announcements on door and faculty screens, targeted by device, group, building, floor or everyone, with priority (info, important, urgent) and an expiry the screen enforces by itself |
+| Two-factor authentication | Authenticator-app codes (TOTP, RFC 6238). Administrators must set it up before the console lets them do anything else; everyone else may. Ten single-use recovery codes, a lockout after five wrong codes, and a reset by another administrator. Every emergency alert, test or real, asks for a fresh code. |
 | Emergency alerts | Fire, biohazard, radiation leak, bomb threat, earthquake and power cut. Takes over the door screens (door code, chevrons towards the emblem, procedure) and loops a synthesised alarm until ended. Test mode shows a TEST tag and plays at a chosen volume. Kept in the digital twin, so an offline screen sounds the alarm when it reconnects and stops if the alert ended meanwhile. A real alert needs two steps enforced by the API, can also be read aloud, and ends with a message shown on the screens (see [Emergency alerts](#emergency-alerts)) |
 | InterCom | Record or import a sound (stored in GridFS, WAV/MP3/Ogg/WebM/M4A, `MAX_AUDIO_MB`), broadcast it to chosen devices. Devices download it over a request signed with their key. Volume and quiet hours per device. **Voice announcements**: type a text, choose a language and a voice, listen to it, then broadcast it (see [Voice and schedules](#voice-announcements-schedules-and-templates)) |
 | Schedules and templates | Announcements that send themselves once, daily, weekly, or when a room changes status; a library of reusable announcement texts |
@@ -229,3 +230,22 @@ Remaining: implement `getAuthorizationUrl` and `handleCallback` in `apps/server/
 ## Adding shadcn components
 
 `cd apps/web && pnpm dlx shadcn@latest add dialog` (config in `components.json`).
+
+## Two-factor authentication
+
+Sign-in is two steps when it is on: `POST /api/auth/login` answers `{ twoFactorRequired, challenge }` (no session yet, a five-minute single-use
+token), and `POST /api/auth/login/2fa { challenge, code | recoveryCode }` gives the session. A person manages their own at `/api/auth/2fa`
+(`GET` status, `POST /setup`, `POST /enable`, `POST /disable`, `POST /recovery-codes`); changing anything needs a current code, so a stolen session
+cannot weaken it.
+
+- Secrets are encrypted at rest (AES-256-GCM) with `TWO_FACTOR_KEY`, a mounted secret required in production (`openssl rand -base64 32`).
+  Recovery codes are stored as hashes only and shown once. Nothing about the second factor is ever returned by the API.
+- A code works once (its time step becomes the floor), five wrong ones in a row lock the account for 15 minutes, and the second-factor
+  endpoints have their own rate limit (`LOGIN_RATE_LIMIT`, twice over).
+- `REQUIRE_ADMIN_2FA` (default `true`): an administrator without it gets `403 two_factor_setup_required` from every endpoint except `/api/auth/*`,
+  and the console sends them to the Security page. Administrators cannot turn it off. Another administrator resets it with
+  `POST /api/users/:id/two-factor/reset` (never one's own), which also signs the person out; it is audited.
+- `POST /api/emergencies` needs `twoFactorCode` for every alert, test mode included. A person without two-factor cannot start one
+  (`two_factor_setup_required`). These answer 403, not 401, so the console does not read a typo as an expired session. Ending an alert needs
+  no code: taking an alarm off the screens is never slowed down. Recovery codes do not work here, only the phone.
+- Not covered: Microsoft SSO sign-in (the identity provider's own multi-factor applies) and API keys (a separate feature).
