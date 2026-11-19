@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { assetRef } from "./screens.js";
 
 /**
  * Visual themes for the door units (the phone app) and the Faculty screens.
@@ -8,7 +9,21 @@ import { z } from "zod";
  * theme can never be bigger than a frame, and a device that does not know a token ignores it. What a theme cannot touch:
  * emergency alerts, which always look the same.
  */
-export const THEME_LIMITS = { css: 12_000, name: 60, scaleMin: 0.8, scaleMax: 1.4, radiusMax: 32 } as const;
+export const THEME_LIMITS = { css: 12_000, name: 60, scaleMin: 0.8, scaleMax: 1.4, radiusMax: 32, fontBytes: 2 * 1024 * 1024 } as const;
+
+/**
+ * Where an uploaded font file may be used. A device registers each file under a fixed family name, `sc-body`,
+ * `sc-heading` or `sc-mono`, and the Faculty screens expose them to the theme CSS as `--font-body`, `--font-heading`
+ * and `--font-mono`. Fonts are files in the asset library, never CSS: `@font-face` and `url()` stay refused.
+ */
+export const THEME_FONT_SLOTS = ["body", "heading", "mono"] as const;
+export type ThemeFontSlot = (typeof THEME_FONT_SLOTS)[number];
+
+const slotRecord = <T extends z.ZodType>(value: T) =>
+  z.object(Object.fromEntries(THEME_FONT_SLOTS.map((slot) => [slot, value.optional()])) as Record<ThemeFontSlot, z.ZodOptional<T>>).strict();
+
+/** What the console sends: the id of a font in the asset library for each slot. */
+const fontChoice = z.string().min(1).max(64);
 
 export const THEME_FONTS = ["system", "sans", "serif", "mono", "condensed"] as const;
 export type ThemeFont = (typeof THEME_FONTS)[number];
@@ -73,6 +88,8 @@ export const themeSpec = z
     name: z.string().trim().min(1).max(THEME_LIMITS.name),
     version: z.number().int().positive(),
     tokens: themeTokens.default({}),
+    /** Font files to download (id, hash, size), as for any other asset. Without one, the app falls back to `fontFamily`. */
+    fonts: slotRecord(assetRef).default({}),
     /** For the Faculty screens only. The door app ignores it. */
     css: z.string().max(THEME_LIMITS.css).optional(),
   })
@@ -87,6 +104,7 @@ export const themeInput = z
     name: z.string().trim().min(1).max(THEME_LIMITS.name),
     description: z.string().trim().max(200).default(""),
     tokens: themeTokens.default({}),
+    fonts: slotRecord(fontChoice).default({}),
     css: z.string().max(THEME_LIMITS.css).default(""),
   })
   .strict()

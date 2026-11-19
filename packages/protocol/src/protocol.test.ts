@@ -324,6 +324,16 @@ describe("themes", () => {
   const spec = (extra: object = {}) => ({ id: "t1", name: "Night", version: 1, tokens: { mode: "dark", colors: { background: "#101828", primary: "#4f8cff" }, typography: { fontFamily: "sans", scale: 1.1 }, shape: { radius: 12 } }, ...extra });
   const send = (theme: unknown) => parseServerMessage(JSON.stringify(buildMessage({ type: "theme.set", payload: { theme } } as never, 1)));
 
+  it("carries font files as asset references, and refuses a slot it does not know", () => {
+    const ref = { assetId: "01J", sha256: "a".repeat(64), size: 1200, mime: "font/woff2" };
+    expect(send(spec({ fonts: { heading: ref } })).ok).toBe(true);
+    expect(send(spec()).ok).toBe(true);
+    expect(send(spec({ fonts: { sparkle: ref } })).ok).toBe(false);
+    expect(send(spec({ fonts: { body: { ...ref, sha256: "nope" } } })).ok).toBe(false);
+    expect(themeInput.safeParse({ name: "Brand", fonts: { body: "01J" } }).success).toBe(true);
+    expect(themeInput.safeParse({ name: "Brand", fonts: { body: "" } }).success).toBe(false);
+  });
+
   it("is a command, and null takes a device back to its own look", () => {
     expect(send(spec()).ok).toBe(true);
     expect(send(null).ok).toBe(true);
