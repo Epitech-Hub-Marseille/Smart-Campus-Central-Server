@@ -1,7 +1,9 @@
-import { THEME_COLORS, THEME_FONTS, THEME_LIMITS, themeInput } from "@smartcampus/protocol";
-import { Router } from "express";
+import { THEME_COLORS, THEME_FONT_SLOTS, THEME_FONTS, THEME_LIMITS, themeInput } from "@smartcampus/protocol";
+import express, { Router } from "express";
 import { requireAuth, requireRole, requireSession } from "../auth/middleware.js";
-import { assignmentInput, createTheme, deleteTheme, resolveForDevice, setAssignment, themeDto, updateTheme } from "../domain/themes.js";
+import { BUNDLE_LIMITS } from "../lib/themeBundle.js";
+import { HttpError } from "../lib/errors.js";
+import { assignmentInput, createTheme, importThemeBundle, deleteTheme, resolveForDevice, setAssignment, themeDto, updateTheme } from "../domain/themes.js";
 import { ThemeAssignmentModel, ThemeModel } from "../models/theme.js";
 
 /** Visual themes for door units and Faculty screens. Admins and operators, from the console only. */
@@ -10,7 +12,7 @@ themesRouter.use(requireAuth, requireSession, requireRole("admin", "operator"));
 
 /** What a theme can hold, so the console never keeps a copy that could drift. */
 themesRouter.get("/schema", (_req, res) => {
-  res.json({ colors: THEME_COLORS, fonts: THEME_FONTS, limits: THEME_LIMITS });
+  res.json({ colors: THEME_COLORS, fonts: THEME_FONTS, fontSlots: THEME_FONT_SLOTS, limits: THEME_LIMITS });
 });
 
 themesRouter.get("/", async (_req, res) => {
@@ -31,6 +33,13 @@ themesRouter.put("/assignments", async (req, res) => {
 /** What a device wears and why, for the console. */
 themesRouter.get("/resolve/:deviceId", async (req, res) => {
   res.json(await resolveForDevice(String(req.params.deviceId)));
+});
+
+/** A theme and its fonts in one .zip (raw body). `?replace=1` makes a theme of the same name a new version of itself. */
+themesRouter.post("/import", express.raw({ type: () => true, limit: BUNDLE_LIMITS.zipBytes }), async (req, res) => {
+  if (!Buffer.isBuffer(req.body)) throw new HttpError(400, "Send the .zip file as the request body");
+  const result = await importThemeBundle(req.body, req.user!, req.query.replace === "1");
+  res.status(result.created ? 201 : 200).json({ theme: themeDto(result.theme), created: result.created, fonts: result.fonts });
 });
 
 themesRouter.post("/", async (req, res) => {

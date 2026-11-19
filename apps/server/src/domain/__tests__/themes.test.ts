@@ -1,4 +1,6 @@
+import { strToU8, zipSync } from "fflate";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { AssetModel } from "../../models/asset.js";
 import { AuditLogModel } from "../../models/auditLog.js";
 import { CommandModel } from "../../models/command.js";
 import { DeviceModel } from "../../models/device.js";
@@ -17,7 +19,7 @@ beforeAll(async () => {
 afterAll(() => h.stop());
 
 beforeEach(async () => {
-  await Promise.all([DeviceModel.deleteMany({}), CommandModel.deleteMany({}), ThemeModel.deleteMany({}), ThemeAssignmentModel.deleteMany({}), AuditLogModel.deleteMany({})]);
+  await Promise.all([DeviceModel.deleteMany({}), CommandModel.deleteMany({}), ThemeModel.deleteMany({}), ThemeAssignmentModel.deleteMany({}), AssetModel.deleteMany({}), AuditLogModel.deleteMany({})]);
 });
 
 const tokens = (primary = "#1d4f9f") => ({ mode: "dark", colors: { background: "#101828", primary }, typography: { fontFamily: "sans", scale: 1.1 }, shape: { radius: 12 } });
@@ -166,3 +168,112 @@ describe("assigning themes", () => {
     expect(await AuditLogModel.countDocuments({ action: "theme.assign" })).toBe(1);
   });
 });
+
+describe("fonts", () => {
+  const woff2 = Buffer.concat([Buffer.from("wOF2"), Buffer.alloc(40, 1)]);
+  const uploadFont = (client: ApiClient, data: Buffer, name = "Display") =>
+    client.raw("POST", `/assets/font?name=${encodeURIComponent(name)}`, { body: data, headers: { "content-type": "application/octet-stream" } });
+  const font = async (name = "Display") => (await (await uploadFont(operator, woff2, name)).json()) as { id: string; sha256: string; size: number };
+
+  it("accepts font files judged by their bytes, for admins and operators only", async () => {
+    const ok = await uploadFont(operator, woff2);
+    expect(ok.status).toBe(201);
+    expect(await ok.json()).toMatchObject({ kind: "font", mime: "font/woff2", size: woff2.length });
+    expect((await uploadFont(operator, Buffer.concat([Buffer.from("OTTO"), Buffer.alloc(40)]))).status).toBe(201);
+    expect((await uploadFont(operator, Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'></svg>"))).status).toBe(415);
+    expect((await uploadFont(operator, Buffer.concat([Buffer.from("ttcf"), Buffer.alloc(40)]))).status).toBe(415);
+    expect((await uploadFont(operator, Buffer.concat([woff2, Buffer.alloc(2 * 1024 * 1024)]))).status).toBe(413);
+    expect((await uploadFont(staff, woff2)).status).toBe(403);
+    expect((await operator.request("GET", "/assets?kind=font")).body.items).toHaveLength(2);
+    expect((await operator.request("GET", "/assets")).body.items).toHaveLength(0);
+  });
+
+  it("is sent to devices as a verified reference, and a door unit may download it", async () => {
+    const f = await font();
+    const t = await theme("Branded", { fonts: { heading: f.id } });
+    expect(t).toMatchObject({ fonts: { heading: f.id } });
+    const door = await h.enrollDevice({ type: "door" });
+    expect((await latest(door.deviceId))?.theme).toBeUndefined();
+    await assign("device", door.deviceId, t.id);
+    expect((await latest(door.deviceId))?.theme).toMatchObject({ fonts: { heading: { assetId: f.id, sha256: f.sha256, size: f.size, mime: "font/woff2" } } });
+    const other = await h.enrollDevice({ type: "door" });
+    const { wasAssetSentTo } = await import("../assets.js");
+    expect(await wasAssetSentTo(door.deviceId, f.id)).toBeTruthy();
+    expect(await wasAssetSentTo(other.deviceId, f.id)).toBeFalsy();
+  });
+
+  it("refuses an id that is not a font, and a font that a theme uses cannot be deleted", async () => {
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(40)]);
+    const image = await (await operator.raw("POST", "/assets/media?name=Logo", { body: png, headers: { "content-type": "application/octet-stream" } })).json();
+    expect((await operator.request("POST", "/themes", { name: "Bad", fonts: { body: image.id } })).status).toBe(400);
+    expect((await operator.request("POST", "/themes", { name: "Bad", fonts: { body: "missing" } })).status).toBe(400);
+    expect((await operator.request("POST", "/themes", { name: "Bad", fonts: { sparkle: image.id } })).status).toBe(400);
+
+    const f = await font();
+    await theme("Branded", { fonts: { body: f.id } });
+    const refused = await operator.request("DELETE", `/assets/${f.id}`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toContain("Branded");
+    expect((await operator.raw("PUT", `/assets/${f.id}/file`, { body: woff2, headers: { "content-type": "application/octet-stream" } })).status).toBe(400);
+  });
+});
+
+describe("theme bundles", () => {
+  const woff2 = Buffer.concat([Buffer.from("wOF2"), Buffer.alloc(40, 7)]);
+  const manifest = (extra: object = {}) => ({ name: "Brand", tokens: tokens(), fontNames: { heading: "display-font" }, ...extra });
+  const bundle = (files: Record<string, Uint8Array | string | object>) =>
+    Buffer.from(zipSync(Object.fromEntries(Object.entries(files).map(([name, value]) => [name, value instanceof Uint8Array ? value : strToU8(typeof value === "string" ? value : JSON.stringify(value))]))));
+  const send = (client: ApiClient, zip: Buffer, query = "") => client.raw("POST", `/themes/import${query}`, { body: zip, headers: { "content-type": "application/zip" } });
+  const valid = () => bundle({ "theme.json": manifest(), "fonts/display-font.woff2": woff2, "brand.css": ".card { gap: 1rem }" });
+
+  it("makes the theme and puts its fonts in the library, in one upload", async () => {
+    const res = await send(operator, valid());
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body).toMatchObject({ created: true, theme: { name: "Brand", css: ".card { gap: 1rem }" }, fonts: [{ slot: "heading", name: "display-font", reused: false }] });
+    expect(body.theme.fonts.heading).toBeTruthy();
+    const library = (await operator.request("GET", "/assets?kind=font")).body.items;
+    expect(library).toHaveLength(1);
+    expect(library[0].id).toBe(body.theme.fonts.heading);
+    expect(await AuditLogModel.countDocuments({ action: "theme.create" })).toBe(1);
+  });
+
+  it("takes the CSS of theme.json over the one of the .css file, and works without fonts", async () => {
+    const zip = bundle({ "theme.json": { name: "Plain", tokens: tokens(), css: "a { color: red }" }, "other.css": "b { color: blue }" });
+    expect((await (await send(operator, zip)).json()).theme.css).toBe("a { color: red }");
+  });
+
+  it("stores a font once: importing again reuses it, and the same name is refused unless replace is asked for", async () => {
+    await send(operator, valid());
+    const again = await send(operator, valid());
+    expect(again.status).toBe(409);
+    const replaced = await send(operator, valid(), "?replace=1");
+    expect(replaced.status).toBe(200);
+    expect(await replaced.json()).toMatchObject({ created: false, theme: { version: 2 }, fonts: [{ reused: true }] });
+    expect((await operator.request("GET", "/assets?kind=font")).body.items).toHaveLength(1);
+  });
+
+  it("changes nothing when anything in the bundle is wrong", async () => {
+    const bad = async (zip: Buffer, status: number) => expect((await send(operator, zip)).status).toBe(status);
+    await bad(Buffer.from("not a zip at all"), 400);
+    await bad(bundle({ "readme.txt": "hi" }), 400);
+    await bad(bundle({ "theme.json": "{nope" }), 400);
+    await bad(bundle({ "theme.json": manifest({ tokens: { colors: { primary: "blue" } } }), "display-font.woff2": woff2 }), 400);
+    await bad(bundle({ "theme.json": manifest({ css: "a { background: url(https://evil.example/x) }" }), "display-font.woff2": woff2 }), 400);
+    await bad(bundle({ "theme.json": manifest() }), 400);
+    await bad(bundle({ "theme.json": manifest({ fontNames: { sparkle: "display-font" } }), "display-font.woff2": woff2 }), 400);
+    await bad(bundle({ "theme.json": manifest(), "display-font.woff2": Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'></svg>") }), 415);
+    await bad(bundle({ "theme.json": manifest(), "display-font.woff2": new Uint8Array(2 * 1024 * 1024 + 1) }), 413);
+    await bad(bundle(Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`f${i}.txt`, "x"]))), 400);
+    expect(await ThemeModel.countDocuments()).toBe(0);
+    expect(await AssetModel.countDocuments()).toBe(0);
+  });
+
+  it("is for admins and operators only, and ignores archive junk and folders", async () => {
+    expect((await send(staff, valid())).status).toBe(403);
+    expect((await send(h.anonymous, valid())).status).toBe(401);
+    const noisy = bundle({ "__MACOSX/._theme.json": "junk", ".DS_Store": "junk", "theme.json": manifest(), "Brand/fonts/display-font.woff2": woff2 });
+    expect((await send(operator, noisy)).status).toBe(201);
+  });
+});
+

@@ -275,6 +275,18 @@ A theme gives the door units and the Faculty screens a look of their own. It is 
 from a fixed list (system, sans, serif, mono, condensed: an arbitrary font cannot be assumed to exist on a device), a text scale from 0.8 to 1.4 and a
 corner radius from 0 to 32. Whatever a theme leaves out keeps the app's own look, and a device ignores a token it does not know.
 
+- **Fonts are files, not CSS.** A theme may name one font file for each slot: `body`, `heading` and `mono` (WOFF2, WOFF, TTF or OTF, up to
+  2 MB, uploaded with `POST /api/assets/font?name=` and judged by their bytes, never by the content type). The theme sends each as an asset
+  reference (id, SHA-256, size); a device downloads it with a signed request, checks the hash and registers it as the family `sc-body`,
+  `sc-heading` or `sc-mono`. Faculty screens also expose them to the theme CSS as `--font-body`, `--font-heading` and `--font-mono` (set only
+  for a slot that has a file; `var(--font-heading, <fallback>)` is the safe way to read one). A slot without a file, or whose download fails,
+  keeps the font family of the tokens. A font used by a theme cannot be deleted or replaced, and a device can only download the fonts of the
+  theme it was sent.
+- **Theme bundles.** `POST /api/themes/import` (raw .zip body, at most 8 MB, admins and operators) creates a theme and puts its fonts in the
+  library in one upload; `?replace=1` turns a theme of the same name into a new version. The .zip holds `theme.json` (`name`, `description`,
+  `tokens`, optional `css`, optional `fontNames` mapping a slot to a font file name), the font files in any folder, and optionally one `.css`
+  file used when `theme.json` has no `css`. Everything is checked before anything is stored (at most 32 files, fonts 2 MB, sizes checked before
+  unpacking, nothing written to disk), a font already in the library with the same bytes is reused, and the console has an Import ZIP button.
 - **CSS is checked** by the server and again by the device: at most 12,000 characters, no `url()`, `@import`, `@font-face`, `expression()`,
   `javascript:` or escape sequences, balanced braces, nothing that could close its own `<style>`. Nothing can be loaded from elsewhere.
 - **Emergency alerts and the end-of-alert notice are never themed.** A Faculty screen removes the theme's CSS while one is showing.

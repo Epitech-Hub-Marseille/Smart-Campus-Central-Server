@@ -7,6 +7,8 @@ const themeSchema = new Schema(
     name: { type: String, required: true, trim: true, unique: true },
     description: { type: String, trim: true, default: "" },
     tokens: { type: Schema.Types.Mixed, default: {} },
+    // Font files by slot (body, heading, mono): ids of assets of kind "font".
+    fonts: { type: Schema.Types.Mixed, default: {} },
     css: { type: String, default: "" },
     // Rises with every edit, so a device can tell it has the latest.
     version: { type: Number, default: 1 },
