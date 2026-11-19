@@ -1,4 +1,4 @@
-import { LogOut, Menu, X } from "lucide-react";
+import { LogOut, Menu, ShieldCheck, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { canEditCampus, useAuth } from "@/auth/AuthContext";
@@ -109,6 +109,9 @@ function Shell() {
       <div className="grid size-8 place-items-center rounded-full bg-accent text-xs font-semibold" aria-hidden title={`${user.name}, ${ROLE_LABEL[user.role]}`}>
         {user.name.slice(0, 1).toUpperCase()}
       </div>
+      <Link to="/security" aria-label="Security" title={user.twoFactor.enabled ? "Security (two-factor on)" : "Security (two-factor off)"} className={cn("rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground", focusRing)}>
+        <ShieldCheck className={cn("size-4", user.twoFactor.enabled && "text-primary")} />
+      </Link>
       <button aria-label="Sign out" title="Sign out" onClick={() => void logout()} className={cn("rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground", focusRing)}>
         <LogOut className="size-4" />
       </button>
@@ -175,6 +178,9 @@ function Shell() {
             </nav>
             <div className="flex items-center gap-3 border-t px-4 py-3 text-xs">
               <span className="min-w-0 flex-1 truncate">{user.name}</span>
+              <Link to="/security" aria-label="Security" className={cn("rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground", focusRing)}>
+                <ShieldCheck className="size-4" />
+              </Link>
               <button aria-label="Sign out" onClick={() => void logout()} className={cn("rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground", focusRing)}>
                 <LogOut className="size-4" />
               </button>

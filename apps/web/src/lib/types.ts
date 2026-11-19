@@ -64,6 +64,7 @@ export interface StaffMember {
   phone: string;
   disabled: boolean;
   hasPassword: boolean;
+  twoFactor: boolean;
 }
 
 export interface Page<T> {

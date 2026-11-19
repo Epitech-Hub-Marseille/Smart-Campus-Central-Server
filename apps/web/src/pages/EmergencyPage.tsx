@@ -1,5 +1,7 @@
 import { ShieldAlert, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { useAuth } from "@/auth/AuthContext";
 import { EmergencyPreview } from "@/components/EmergencyPreview";
 import { ErrorText, Field } from "@/components/Field";
 import { PageHeader } from "@/components/PageHeader";
@@ -10,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useDeviceStatus } from "@/lib/DeviceStatus";
 import { timeAgo, type Emergency, type EmergencyConfirmation, type EmergencyInfo, type EmergencyKind, type Page, type VoiceCatalogue } from "@/lib/types";
 import { useFetch, useOnChange } from "@/lib/useFetch";
@@ -227,6 +229,9 @@ function Trigger({ catalogue, onTriggered }: { catalogue: EmergencyInfo[]; onTri
   const [testVolume, setTestVolume] = useState(20);
   const [targets, setTargets] = useState<TargetState>(emptyTargetState());
   const [speak, setSpeak] = useState(false);
+  // Every alert, test or real, needs a code from the authenticator app: a session alone cannot sound an alarm.
+  const [code, setCode] = useState("");
+  const { user } = useAuth();
   // Step one of a real alert: the server describes what is about to happen and hands out a token.
   const [pending, setPending] = useState<EmergencyConfirmation | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -250,26 +255,34 @@ function Trigger({ catalogue, onTriggered }: { catalogue: EmergencyInfo[]; onTri
     const chosen = toTargets(targets);
     return chosen ? { kind, targets: chosen, testMode, testVolume, speak } : null;
   };
+  const needsSetup = !user?.twoFactor.enabled;
 
   async function onClick() {
     const alert = body();
     if (!alert) return setError("Choose which screens to alert");
+    // The code is only asked for when the alert is actually sent; the first step of a real alert sends nothing.
+    const sending = testMode || Boolean(pending);
+    if (sending && !/^\d{6}$/.test(code.replace(/\s/g, ""))) return setError("Enter the 6-digit code from your authenticator app");
     setBusy(true);
     setError(null);
     try {
       if (testMode) {
-        await api("/emergencies", { body: alert });
+        await api("/emergencies", { body: { ...alert, twoFactorCode: code } });
+        setCode("");
         onTriggered();
       } else if (!pending) {
         // A real alert needs two steps, enforced by the server: it sounds a full-volume alarm in the building.
         setPending(await api<EmergencyConfirmation>("/emergencies/confirmations", { body: alert }));
       } else {
-        await api("/emergencies", { body: { ...alert, confirmation: pending.confirmation } });
+        await api("/emergencies", { body: { ...alert, confirmation: pending.confirmation, twoFactorCode: code } });
         setPending(null);
+        setCode("");
         onTriggered();
       }
     } catch (e) {
-      setPending(null);
+      // A wrong code keeps the confirmation: the alert is the same, only the code has to be typed again.
+      if (!(e instanceof ApiError && e.code === "two_factor_invalid")) setPending(null);
+      setCode("");
       setError(e instanceof Error ? e.message : "Could not trigger the alert");
     } finally {
       setBusy(false);
@@ -353,10 +366,19 @@ function Trigger({ catalogue, onTriggered }: { catalogue: EmergencyInfo[]; onTri
               This will sound “{pending.title}” on {pending.deviceCount} screen{pending.deviceCount === 1 ? "" : "s"}. Confirm within {secondsLeft} s.
             </p>
           )}
+          {needsSetup ? (
+            <p role="alert" className="rounded-lg border border-destructive/50 bg-destructive/5 p-3 text-sm">
+              Alerts need two-factor authentication. <Link to="/security" className="text-primary underline-offset-4 hover:underline">Set it up</Link> first.
+            </p>
+          ) : (testMode || pending) && (
+            <Field label="Authenticator code" htmlFor="e-code" hint="Required for every alert, including tests.">
+              <Input id="e-code" inputMode="numeric" autoComplete="one-time-code" maxLength={7} value={code} onChange={(e) => setCode(e.target.value)} className="max-w-40 font-mono tracking-widest" />
+            </Field>
+          )}
           <ErrorText>{error}</ErrorText>
 
           <div className="flex gap-2">
-            <Button variant={testMode ? "default" : "destructive"} disabled={busy} onClick={() => void onClick()}>
+            <Button variant={testMode ? "default" : "destructive"} disabled={busy || needsSetup} onClick={() => void onClick()}>
               {busy ? "Sending…" : testMode ? "Start test" : pending ? "Confirm: sound the alarm" : "Trigger alert"}
             </Button>
             {pending && (

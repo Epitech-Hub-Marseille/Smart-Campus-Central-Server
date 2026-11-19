@@ -1,4 +1,4 @@
-import { Mail, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Mail, Pencil, Plus, Search, ShieldOff, Trash2 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "@/auth/AuthContext";
 import { ErrorText, Field } from "@/components/Field";
@@ -116,6 +116,20 @@ export function StaffPage() {
                     <Button variant="ghost" size="icon" aria-label={`Edit ${m.name}`} onClick={() => setEditing(m)}>
                       <Pencil />
                     </Button>
+                    {isAdmin && m.id !== user?.id && m.twoFactor && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Reset two-factor authentication of ${m.name}`}
+                        title="Reset two-factor authentication"
+                        onClick={() =>
+                          confirm(`Reset two-factor authentication for ${m.name}? They are signed out and must set it up again.`) &&
+                          void run(() => api(`/users/${m.id}/two-factor/reset`, { method: "POST" }), `Two-factor authentication reset for ${m.name}.`)
+                        }
+                      >
+                        <ShieldOff />
+                      </Button>
+                    )}
                     {isAdmin && m.id !== user?.id && (
                       <Button
                         variant="ghost"

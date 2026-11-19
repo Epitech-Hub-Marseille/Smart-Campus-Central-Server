@@ -8,6 +8,7 @@ import { MediaPage } from "@/pages/MediaPage";
 import { NewsPage } from "@/pages/NewsPage";
 import { ScreensPage } from "@/pages/ScreensPage";
 import { ReservationsPage } from "@/pages/ReservationsPage";
+import { SecurityPage } from "@/pages/SecurityPage";
 import { SectionPage } from "@/pages/SectionPage";
 import { SchedulesPage } from "@/pages/SchedulesPage";
 import { TemplatesPage } from "@/pages/TemplatesPage";
@@ -38,6 +39,7 @@ export default function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route path="/" element={<DashboardPage />} />
+              <Route path="/security" element={<SecurityPage />} />
               <Route path="/section/:id" element={<SectionPage />} />
               <Route path="/rooms" element={<RoomsPage />} />
               <Route path="/buildings" element={<BuildingsPage />} />

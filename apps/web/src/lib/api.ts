@@ -2,6 +2,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** A stable word from the server (for example `two_factor_required`), unlike the message. */
+    public code?: string,
   ) {
     super(message);
   }
@@ -44,7 +46,7 @@ export async function api<T>(path: string, init: Init = {}): Promise<T> {
   if (!res.ok) {
     // A failed login/me is a normal "not signed in", not an expired session.
     if (res.status === 401 && !path.startsWith("/auth/")) onUnauthorized?.();
-    throw new ApiError(res.status, data.error ?? res.statusText);
+    throw new ApiError(res.status, data.error ?? res.statusText, data.code);
   }
   return data as T;
 }
@@ -60,7 +62,7 @@ export async function apiBlob(path: string, body: unknown): Promise<Blob> {
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) onUnauthorized?.();
-    throw new ApiError(res.status, data.error ?? res.statusText);
+    throw new ApiError(res.status, data.error ?? res.statusText, data.code);
   }
   return res.blob();
 }
