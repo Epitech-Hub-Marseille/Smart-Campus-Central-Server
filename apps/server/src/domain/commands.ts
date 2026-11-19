@@ -12,6 +12,7 @@ const STATE_COMMAND_TYPES: readonly CommandType[] = [
   "room.status.set",
   "room.info.set",
   "display.config.set",
+  "theme.set",
   "faculty.config.set",
   // A snapshot: only the newest is true. It is rebuilt on every connection instead of kept in the twin (see domain/faculty.ts).
   "faculty.content.set",
@@ -69,6 +70,7 @@ async function updateDesiredFor(deviceId: string, type: CommandType, payload: Re
   if (type === "room.status.set") await patchDesired(deviceId, { roomStatus: payload });
   else if (type === "room.info.set") await patchDesired(deviceId, { room: payload });
   else if (type === "display.config.set") await patchDesired(deviceId, { displayConfig: payload.config });
+  else if (type === "theme.set") await patchDesired(deviceId, { theme: payload.theme });
   else if (type === "faculty.config.set") await patchDesired(deviceId, { facultyConfig: payload.config });
   else if (type === "reservations.set") await patchDesired(deviceId, { reservations: payload });
   else if (type === "audio.settings.set") await patchDesired(deviceId, { audioSettings: payload });

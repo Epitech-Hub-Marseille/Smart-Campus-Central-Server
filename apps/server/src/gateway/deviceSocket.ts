@@ -13,6 +13,7 @@ import { decideCard } from "../domain/badges.js";
 import { closeGrant, runMaintenanceAction } from "../domain/maintenance.js";
 import { markAcked, markNacked, pendingCommands } from "../domain/commands.js";
 import { refreshFacultyOnConnect } from "../domain/faculty.js";
+import { pushThemes } from "../domain/themes.js";
 import { activePublicKey, desiredState, recordReport, touchLastSeen } from "../domain/devices.js";
 import { DeviceConnection } from "./deviceConnection.js";
 import { registry } from "./registry.js";
@@ -84,6 +85,8 @@ export function handleDeviceSocket(ws: WebSocket, ip: string, opts: DeviceSocket
 
       // Faculty content is derived data, rebuilt here instead of being kept in the twin (see domain/faculty.ts).
       await refreshFacultyOnConnect(connection.deviceId).catch((err) => log("warn", "faculty refresh failed", { deviceId: connection.deviceId, err: err instanceof Error ? err.message : String(err) }));
+      // A device that joined after the default theme was set has not been told about it yet.
+      await pushThemes([connection.deviceId]).catch((err) => log("warn", "theme push failed", { deviceId: connection.deviceId, err: err instanceof Error ? err.message : String(err) }));
       // Full desired state first, then the commands the device has not acknowledged.
       const pending = await pendingCommands(connection.deviceId);
       connection.send("session.ready", {

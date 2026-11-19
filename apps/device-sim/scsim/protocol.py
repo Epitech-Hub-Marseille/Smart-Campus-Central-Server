@@ -25,6 +25,7 @@ COMMAND_TYPES = {
     "room.status.set",
     "room.info.set",
     "display.config.set",
+    "theme.set",
     "faculty.config.set",
     "faculty.content.set",
     "carousel.set",

@@ -167,6 +167,14 @@ class DeviceBehaviour:
             # The screen shows the current or next booking that has not ended, and drops past ones by itself.
             upcoming = sorted((r for r in p["items"] if r["end"] > now_ms), key=lambda r: r["start"])
             log(f"  reservations of room {p['roomId']}: {len(upcoming)} to come" + (f", next: {upcoming[0]['title']}" if upcoming else ""))
+        elif t == "theme.set":
+            theme = p["theme"]
+            self.state["theme"] = theme["id"] if theme else None
+            if theme:
+                colors = theme["tokens"].get("colors", {})
+                log(f"  theme: {theme['name']} v{theme['version']}, {len(colors)} colour(s), css {len(theme.get('css', ''))} chars")
+            else:
+                log("  theme: none, back to the app's own look")
         elif t == "faculty.config.set":
             c = p["config"]
             self.state["faculty"] = {"service": c["service"], "rotate": c["carousel"]["enabled"]}

@@ -25,6 +25,7 @@ import { serverKeyRouter } from "./routes/serverKey.js";
 import { roomStatusesRouter } from "./routes/roomStatuses.js";
 import { roomsRouter } from "./routes/rooms.js";
 import { studentsRouter } from "./routes/students.js";
+import { themesRouter } from "./routes/themes.js";
 import { usersRouter } from "./routes/users.js";
 
 const isBodyParserError = (err: unknown): err is { status: number } =>
@@ -75,6 +76,7 @@ export function createApp(options: { serverPublicKey?: string } = {}) {
   api.use("/rooms", roomsRouter);
   api.use("/room-statuses", roomStatusesRouter);
   api.use("/api-keys", apiKeysRouter);
+  api.use("/themes", themesRouter);
   api.use("/users", usersRouter);
   api.use("/students", studentsRouter);
   api.use("/card-registration", cardRegistrationRouter);
