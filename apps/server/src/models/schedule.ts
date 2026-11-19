@@ -1,6 +1,6 @@
 import { ANNOUNCE_PRIORITIES } from "@smartcampus/protocol";
 import { Schema, model } from "mongoose";
-import { CHIME_LEVELS } from "../lib/chimes.js";
+import { CHIME_IDS } from "../lib/chimes.js";
 
 const targetsSchema = new Schema(
   {
@@ -22,7 +22,7 @@ const contentSchema = new Schema(
     priority: { type: String, enum: ANNOUNCE_PRIORITIES, default: "info" },
     voice: { type: String, default: "" },
     // Voice only: the chime played before the voice, by severity. Absent: none.
-    chime: { type: String, enum: [...CHIME_LEVELS] },
+    chime: { type: String, enum: [...CHIME_IDS] },
     // A text announcement disappears this long after it is shown. Absent: it stays until cancelled.
     expiresAfterMinutes: { type: Number },
   },

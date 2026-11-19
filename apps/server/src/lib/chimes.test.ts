@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { CHIME_LEVELS, chimeWav, prependChime, renderChime, type ChimeLevel } from "./chimes.js";
+import { CHIME_IDS, CHIME_GROUPS, CHIME_PITCH, CHIME_SLOWDOWN, chimeCatalogue, chimeWav, prependChime, renderChime, type ChimeId } from "./chimes.js";
 import { readWav, writeWav } from "./wav.js";
 
-const RATE = 24_000;
+const RECORDED = 44_100;
 
 /** Strength of one frequency in a stretch of samples (Goertzel), so a test can ask "is this note there?". */
-function level(samples: Float32Array, hz: number, from = 0, to = samples.length): number {
-  const w = (2 * Math.PI * hz) / RATE;
+function level(samples: Float32Array, hz: number, rate: number, from = 0, to = samples.length): number {
+  const w = (2 * Math.PI * hz) / rate;
   let s1 = 0;
   let s2 = 0;
   for (let i = from; i < to; i++) {
@@ -17,91 +17,72 @@ function level(samples: Float32Array, hz: number, from = 0, to = samples.length)
   return Math.sqrt(s1 * s1 + s2 * s2 - 2 * Math.cos(w) * s1 * s2) / (to - from);
 }
 const peak = (samples: Float32Array) => samples.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
-const seconds = (t: number) => Math.round(t * RATE);
+const at = (seconds: number, rate = RECORDED) => Math.round(seconds * rate);
+const groupOf = (id: ChimeId) => chimeCatalogue().chimes.find((c) => c.id === id)!.group;
 
-const rms = (samples: Float32Array, from: number, to: number) => Math.sqrt(samples.slice(from, to).reduce((sum, v) => sum + v * v, 0) / (to - from));
-
-describe("chimes", () => {
-  it("get louder with the severity, never clip, and are always the same", () => {
-    const peaks = Object.fromEntries(CHIME_LEVELS.map((l) => [l, peak(renderChime(l, RATE))]));
-    expect(peaks.info!).toBeCloseTo(0.35, 2);
-    expect(peaks.important!).toBeCloseTo(0.55, 2);
-    expect(peaks.urgent!).toBeCloseTo(0.9, 2);
-    expect(peaks.info!).toBeLessThan(peaks.important!);
-    expect(peaks.important!).toBeLessThan(peaks.urgent!);
-    // The manual ones sit in between, the important one nearly as loud as an urgent one.
-    expect(peaks.override!).toBeCloseTo(0.67, 2);
-    expect(peaks["important-override"]!).toBeCloseTo(0.88, 2);
-    expect(Math.max(...Object.values(peaks))).toBeLessThan(0.95);
-    expect(renderChime("urgent", RATE)).toEqual(renderChime("urgent", RATE));
-  });
-
-  it("info is two soft blips, a rising fifth: D4 then A4, each with a little third harmonic", () => {
-    const chime = renderChime("info", RATE);
-    const first = [seconds(0.03), seconds(0.25)] as const;
-    const second = [seconds(0.33), seconds(0.55)] as const;
-    expect(level(chime, 293.7, ...first)).toBeGreaterThan(level(chime, 293.7, ...second) * 2);
-    expect(level(chime, 440, ...second)).toBeGreaterThan(level(chime, 440, ...first) * 2);
-    // The third harmonic is there, the fourth is not.
-    expect(level(chime, 881, ...first)).toBeGreaterThan(level(chime, 1175, ...first) * 3);
-    expect(level(chime, 1320, ...second)).toBeGreaterThan(level(chime, 1100, ...second) * 3);
-  });
-
-  it("important is two held E5 tones 0.54 s apart, with a shimmer and bright upper partials", () => {
-    const chime = renderChime("important", RATE);
-    const held = (t0: number, t1: number) => level(chime, 659.3, seconds(t0), seconds(t1));
-    expect(held(0.08, 0.35)).toBeGreaterThan(0.01);
-    expect(held(0.62, 0.9)).toBeGreaterThan(0.01);
-    // The tone stays steady while held, and there is a gap between the two.
-    expect(rms(chime, seconds(0.46), seconds(0.52))).toBeLessThan(rms(chime, seconds(0.2), seconds(0.3)) * 0.3);
-    // The side partial 27 Hz above is a real part of the tone, and the bright partial at 1103 Hz rings.
-    expect(level(chime, 686.3, seconds(0.08), seconds(0.35))).toBeGreaterThan(level(chime, 760, seconds(0.08), seconds(0.35)) * 4);
-    expect(level(chime, 1105, seconds(0.08), seconds(0.35))).toBeGreaterThan(level(chime, 1300, seconds(0.08), seconds(0.35)) * 3);
-  });
-
-  it("urgent is a bright stab that drops into a harsh chopped buzz", () => {
-    const chime = renderChime("urgent", RATE);
-    const stab = [seconds(0.02), seconds(0.19)] as const;
-    const buzz = [seconds(0.3), seconds(0.85)] as const;
-    expect(level(chime, 1267, ...stab)).toBeGreaterThan(level(chime, 1267, ...buzz) * 2);
-    // The buzz is a sawtooth near 235 Hz: its harmonics, 2nd and 6th stressed, reach far up.
-    expect(level(chime, 471, ...buzz)).toBeGreaterThan(level(chime, 400, ...buzz) * 4);
-    expect(level(chime, 1413, ...buzz)).toBeGreaterThan(level(chime, 1300, ...buzz) * 3);
-    expect(level(chime, 3297, ...buzz)).toBeGreaterThan(level(chime, 3180, ...buzz) * 3);
-    // Chopped 14 times a second: the level goes up and down within 70 ms.
-    const levels = [0, 1, 2, 3].map((n) => rms(chime, seconds(0.5 + n / 56), seconds(0.5 + n / 56 + 0.008)));
-    expect(Math.max(...levels)).toBeGreaterThan(Math.min(...levels) * 1.25);
-  });
-
-  it("override is two clean beeps on A4, with a gap between them", () => {
-    const chime = renderChime("override", RATE);
-    expect(level(chime, 440, seconds(0.05), seconds(0.3))).toBeGreaterThan(level(chime, 523, seconds(0.05), seconds(0.3)) * 8);
-    expect(level(chime, 440, seconds(0.5), seconds(0.68))).toBeGreaterThan(0.05);
-    expect(rms(chime, seconds(0.38), seconds(0.44))).toBeLessThan(rms(chime, seconds(0.1), seconds(0.3)) * 0.1);
-  });
-
-  it("important-override runs E5, C5, a bright D#6 dyad, then a low tail", () => {
-    const chime = renderChime("important-override", RATE);
-    const at = (hz: number, t0: number, t1: number) => level(chime, hz, seconds(t0), seconds(t1));
-    expect(at(659.3, 0.03, 0.2)).toBeGreaterThan(at(523.3, 0.03, 0.2) * 3);
-    expect(at(523.3, 0.29, 0.38)).toBeGreaterThan(at(659.3, 0.29, 0.38) * 3);
-    expect(at(1262, 0.48, 0.74)).toBeGreaterThan(at(523.3, 0.48, 0.74) * 5);
-    expect(at(325, 0.85, 1.0)).toBeGreaterThan(at(1262, 0.85, 1.0) * 5);
-  });
-
-  it("ends without a click", () => {
-    for (const l of CHIME_LEVELS) {
-      const chime = renderChime(l, RATE);
-      expect(Math.abs(chime[chime.length - 1]!)).toBeLessThan(0.001);
+describe("the chimes", () => {
+  it("all play: mono, a second or so long, not clipping and not cut off", () => {
+    for (const id of CHIME_IDS) {
+      const wav = readWav(chimeWav(id))!;
+      expect(wav, id).toMatchObject({ sampleRate: RECORDED, channels: 1 });
+      const seconds = wav.samples.length / RECORDED;
+      expect(seconds, id).toBeGreaterThan(0.7);
+      expect(seconds, id).toBeLessThan(1.6);
+      const samples = renderChime(id, RECORDED);
+      expect(peak(samples), id).toBeGreaterThan(0.25);
+      expect(peak(samples), id).toBeLessThan(1);
+      expect(samples.every((v) => Number.isFinite(v)), id).toBe(true);
+      expect(Math.abs(samples[samples.length - 1]!), id).toBeLessThan(0.001);
     }
   });
 
-  it("can be heard on their own as a WAV", () => {
-    for (const l of CHIME_LEVELS) {
-      const wav = readWav(chimeWav(l));
-      expect(wav).toMatchObject({ sampleRate: 24_000, channels: 1 });
-      expect(wav!.samples.length).toBeGreaterThan(20_000);
+  it("are quiet for information, louder for a warning, loudest when critical", () => {
+    const peaks = (group: string) => CHIME_IDS.filter((id) => groupOf(id) === group).map((id) => peak(renderChime(id, RECORDED)));
+    expect(Math.max(...peaks("info"))).toBeLessThan(Math.min(...peaks("warning")));
+    expect(Math.max(...peaks("warning"))).toBeLessThan(Math.min(...peaks("critical")));
+  });
+
+  it("keep the character of their reference but are not copies: the same notes, one semitone higher", () => {
+    expect(CHIME_PITCH).toBeCloseTo(1.0595, 3);
+    expect(CHIME_SLOWDOWN).toBe(1.04);
+    // [chime, reference pitch, window]: the moved pitch is strong, the reference's own pitch is not.
+    const cases: [ChimeId, number, number, number][] = [
+      ["info-dudu", 369, 0.05, 0.45],
+      ["manual-override", 393, 0, 0.35],
+      ["warning-dadac", 658, 0.05, 0.5],
+      ["critical-buzwarn", 471, 0.05, 0.5],
+      ["critical-deeoo", 1267, 0.03, 0.2],
+      ["warning-dadeda", 505, 0.05, 0.45],
+    ];
+    for (const [id, hz, from, to] of cases) {
+      const s = renderChime(id, RECORDED);
+      const moved = level(s, hz * CHIME_PITCH, RECORDED, at(from), at(to));
+      expect(moved, `${id} moved`).toBeGreaterThan(level(s, hz, RECORDED, at(from), at(to)) * 2.5);
     }
+  });
+
+  it("are the same at any rate of voice, with the same pitch, and never fold high partials back as noise", () => {
+    for (const rate of [24_000, 16_000, 22_050]) {
+      const s = renderChime("info-dudu", rate);
+      const from = at(0.05, rate);
+      const to = at(0.45, rate);
+      expect(level(s, 369 * CHIME_PITCH, rate, from, to)).toBeGreaterThan(level(s, 369, rate, from, to) * 2.5);
+      expect(s.every((v) => Number.isFinite(v))).toBe(true);
+    }
+    // At 16 kHz the buzz has partials the rate cannot carry: none is allowed to fold below, so nothing sits above 0.45 of the rate.
+    const buzz = renderChime("critical-buzwarn", 16_000);
+    expect(level(buzz, 7500, 16_000, 2000, 12_000)).toBeLessThan(level(buzz, 499, 16_000, 2000, 12_000) * 0.2);
+  });
+
+  it("are always the same", () => {
+    expect(renderChime("warning-dadab", 24_000)).toEqual(renderChime("warning-dadab", 24_000));
+  });
+
+  it("are listed for the console by group, with a name each", () => {
+    const { groups, chimes } = chimeCatalogue();
+    expect(groups.map((g) => g.id)).toEqual(CHIME_GROUPS.map((g) => g.id));
+    expect(chimes).toHaveLength(CHIME_IDS.length);
+    expect(chimes.every((c) => c.label.length > 0 && groups.some((g) => g.id === c.group))).toBe(true);
   });
 });
 
@@ -110,20 +91,26 @@ describe("a chime in front of a voice", () => {
 
   it("is the chime, a pause, then the voice untouched, at the voice's own sample rate", () => {
     for (const rate of [24_000, 16_000, 44_100]) {
-      const joined = readWav(prependChime(voice(rate), "info" as ChimeLevel)!)!;
+      const joined = readWav(prependChime(voice(rate), "info-dudu")!)!;
       expect(joined.sampleRate).toBe(rate);
-      const lead = Math.round(1.3 * rate) + Math.round(0.35 * rate);
+      const chimeLength = renderChime("info-dudu", rate).length;
+      const lead = chimeLength + Math.round(0.35 * rate);
       expect(joined.samples.length).toBe(lead + rate);
       expect(joined.samples.slice(lead).every((v) => v === 1000)).toBe(true);
-      // The pause is silent.
-      expect(joined.samples.slice(Math.round(1.3 * rate), lead).every((v) => v === 0)).toBe(true);
+      expect(joined.samples.slice(chimeLength, lead).every((v) => v === 0)).toBe(true);
     }
   });
 
+  it("pauses less before the more urgent sounds", () => {
+    const lead = (id: ChimeId) => readWav(prependChime(voice(24_000), id)!)!.samples.length - 24_000 - renderChime(id, 24_000).length;
+    expect(lead("critical-deeoo")).toBeLessThan(lead("warning-dadaa"));
+    expect(lead("warning-dadaa")).toBeLessThan(lead("info-bloop"));
+  });
+
   it("keeps a stereo voice stereo", () => {
-    const joined = readWav(prependChime(voice(24_000, 2), "urgent")!)!;
+    const joined = readWav(prependChime(voice(24_000, 2), "critical-buzwarn")!)!;
     expect(joined.channels).toBe(2);
-    expect(joined.samples[0]).toBe(joined.samples[1]);
+    expect(joined.samples[1000]).toBe(joined.samples[1001]);
   });
 
   it("reads a streaming WAV whose header does not know its length", () => {
@@ -133,11 +120,12 @@ describe("a chime in front of a voice", () => {
     expect(readWav(wav)!.samples.length).toBe(24_000);
   });
 
-  it("gives null for anything that is not a 16-bit PCM WAV, so the voice goes out as it is", () => {
-    expect(prependChime(Buffer.from("ID3 not wav at all, an mp3 or something else"), "info")).toBeNull();
+  it("gives null for anything that is not a 16-bit PCM WAV, or for a chime that does not exist, so the voice goes out as it is", () => {
+    expect(prependChime(Buffer.from("ID3 not wav at all, an mp3 or something else"), "info-dudu")).toBeNull();
     const eightBit = voice(24_000);
     eightBit.writeUInt16LE(8, 34);
-    expect(prependChime(eightBit, "info")).toBeNull();
-    expect(prependChime(Buffer.alloc(10), "info")).toBeNull();
+    expect(prependChime(eightBit, "info-dudu")).toBeNull();
+    expect(prependChime(Buffer.alloc(10), "info-dudu")).toBeNull();
+    expect(prependChime(voice(24_000), "urgent")).toBeNull();
   });
 });

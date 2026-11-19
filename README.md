@@ -74,14 +74,17 @@ decision, so the shipped implementation speaks the OpenAI `POST /audio/speech` A
   If the container falls back to CPU or fails on an older GPU, see its logs: the image's CUDA build must support your card.
 - The text is limited to 1000 characters and synthesis is rate-limited per person (20 a minute). The reply must really be audio (sniffed)
   and not larger than `MAX_AUDIO_MB`. The engine's error text is never passed to the console.
-- **Chimes.** A voice can start with a chime that tells how serious the announcement is (`chime` in the InterCom form and in scheduled voice content).
-  They are new sounds with the character of the references in `docs/inspiration/chimes` (pitch, partials, rhythm and level were measured on each):
-  `info` is two soft sine blips, a rising fifth (about -9 dBFS); `important` is a held "da-da" on E5 with a 27 Hz shimmer (-5 dBFS); `urgent` is a bright
-  stab that drops into a harsh buzz, a sawtooth near 235 Hz chopped 14 times a second (-1 dBFS); `override` is two clean beeps on A4 (-3.5 dBFS) and
-  `important-override` a busy figure of bells that ends on a low tail (-1 dBFS), for manual broadcasts. The more serious, the louder. They are generated in
-  `lib/chimes.ts` (nothing stored) and joined to the voice on the server, so the devices play one file and need no change. To join them without a
-  decoder the server asks the engine for `wav`; an engine that does not return a 16-bit PCM WAV gets its voice sent as it is, with a warning in the
-  log. `GET /api/intercom/chimes/:level` returns a chime alone to pre-listen to.
+- **Chimes.** A voice can start with a chime that tells how serious the announcement is (`chime` in the InterCom form and in scheduled voice content, one of the
+  11 below). They are synthesised from measurements of the reference sounds of `docs/inspiration/chimes`: `apps/server/tools/chime-analysis.py` stores, for each
+  sound, the tracks of its partials (pitch and level over time), its loudness and its peak in `apps/server/assets/chimes/*.json` (about 240 KB, shipped through
+  `files` in `package.json`), and `lib/chimes.ts` plays them as sine waves. So each chime keeps the character of its reference (the roughness of the tone, the
+  rhythm, the level) without being a copy: every one is moved up a semitone and played 4% slower, and no recording is kept. The groups are **information**
+  (`info-bloop`, `info-doop`, `info-dudu`: soft blips), **warning** (`warning-dadaa`, `-dadab`, `-dadac`, `-dadeda`: held "da-da" tones), **critical**
+  (`critical-buzwarn`, `critical-deeoo`: a buzz and a falling stab) and **manual override** (`manual-override`, `important-manual-override`). The more serious, the
+  louder and rougher, and the shorter the pause before the voice (0.35 s, 0.25 s, 0.15 s, 0.2 s). A chime is built at the rate of the voice and joined to it on the
+  server, so the devices play one file and need no change. To join them without a decoder the server asks the engine for `wav`; an engine that does not return a
+  16-bit PCM WAV, or an unknown chime, gets the voice sent as it is, with a warning in the log. `GET /api/intercom/chimes` lists them by group and
+  `GET /api/intercom/chimes/:id` returns one to pre-listen to.
 
 **Schedules** (`/schedules`, admins and operators). A schedule announces a text (on screens) or a voice, at a time or on an event:
 

@@ -1,223 +1,185 @@
+import { readFileSync } from "node:fs";
 import { readWav, writeWav, type PcmWav } from "./wav.js";
 
 /**
- * Chimes played before a voice announcement, by severity. They were designed from the reference sounds in
- * `docs/inspiration/chimes` (measured pitch, partials, rhythm and level of each), as new sounds with the same character:
+ * Chimes played before a voice announcement. They are synthesised from measurements of the reference sounds the campus chose
+ * in `docs/inspiration/chimes` (`tools/chime-analysis.py` measures them): for each sound, the tracks of its partials (pitch and
+ * level over time), its overall loudness and its peak level, in `assets/chimes/*.json`. The synthesiser plays those tracks as
+ * sine waves, so a chime keeps the character of its reference (soft blips for information, held "da-da" tones for a warning, a
+ * stab and a buzz for a critical message, beeps for a manual override, the roughness of each tone and the rhythm), but it is
+ * not a copy: every chime is moved up one semitone and played 4% slower, and no recording is kept or played.
  *
- * - info: two soft sine blips, a rising fifth ("doo-oop"), each with a little third harmonic and a gentle fall. Quiet, about -9 dBFS.
- * - important (the "warning" family): two held "da-da" tones on E5, 0.54 s apart, with the shimmer of a 27 Hz side partial and
- *   bright upper partials. About -5 dBFS.
- * - urgent (the "critical" family): a bright stab that drops into a harsh buzz, "dee-BUZZ": a sawtooth near 235 Hz, chopped
- *   14 times a second. About -1 dBFS.
- * - override ("manual override"): two clean beeps on A4, a pure tone with its third harmonic. About -3.5 dBFS.
- * - important-override ("important manual override"): a busy figure of bells, E5, C5, a bright dyad, then a low tail. About -1 dBFS.
- *
- * A louder chime means a more serious announcement. The chime is generated here, at the sample rate of the voice it precedes,
- * and joined to it, so a door unit or a Faculty screen just plays one file and needs to know nothing about chimes.
+ * A chime is built at the sample rate of the voice it precedes and joined to it on the server, so a door unit or a Faculty
+ * screen just plays one file and needs to know nothing about chimes.
  */
-export const CHIME_LEVELS = ["info", "important", "urgent", "override", "important-override"] as const;
-export type ChimeLevel = (typeof CHIME_LEVELS)[number];
+export const CHIME_GROUPS = [
+  { id: "info", label: "Information" },
+  { id: "warning", label: "Warning" },
+  { id: "critical", label: "Critical" },
+  { id: "manual-override", label: "Manual override" },
+] as const;
+export type ChimeGroup = (typeof CHIME_GROUPS)[number]["id"];
 
-/** One tone of a note: a frequency in Hz and its level relative to the strongest. */
-interface Partial {
-  hz: number;
-  gain: number;
-}
-
-/** A tone that starts at `at`, is held for `hold` seconds and fades out over `release`. */
-interface Note {
-  at: number;
-  hold: number;
-  partials: Partial[];
-  /** Level of the note in the chime. */
-  level?: number;
-  /** Seconds to rise to full level. */
-  attack?: number;
-  /** Seconds to fall by 60 dB while held; left out, the level stays steady. */
-  decay?: number;
-  release?: number;
-  /** Chops the note in level `hz` times a second, `depth` between 0 and 1. */
-  chop?: { hz: number; depth: number };
-  /** Share of soft noise (breath) mixed in, between 0 and 1. */
-  breath?: number;
-}
-
-interface Design {
-  notes: Note[];
-  /** Length of the chime and of the pause before the voice, in seconds. */
-  length: number;
+interface ChimeSpec {
+  id: string;
+  group: ChimeGroup;
+  label: string;
+  /** Seconds of silence between the chime and the voice: shorter for the more urgent sounds. */
   pause: number;
-  /** Peak level, as a share of full scale. */
+}
+
+const CATALOGUE = [
+  { id: "info-bloop", group: "info", label: "Bloop", pause: 0.35 },
+  { id: "info-doop", group: "info", label: "Doop", pause: 0.35 },
+  { id: "info-dudu", group: "info", label: "Dudu", pause: 0.35 },
+  { id: "warning-dadaa", group: "warning", label: "Da-da (A)", pause: 0.25 },
+  { id: "warning-dadab", group: "warning", label: "Da-da (B)", pause: 0.25 },
+  { id: "warning-dadac", group: "warning", label: "Da-da (C)", pause: 0.25 },
+  { id: "warning-dadeda", group: "warning", label: "Da-de-da", pause: 0.25 },
+  { id: "critical-buzwarn", group: "critical", label: "Buzz warning", pause: 0.15 },
+  { id: "critical-deeoo", group: "critical", label: "Dee-oo", pause: 0.15 },
+  { id: "manual-override", group: "manual-override", label: "Manual override", pause: 0.2 },
+  { id: "important-manual-override", group: "manual-override", label: "Important manual override", pause: 0.2 },
+] as const satisfies readonly ChimeSpec[];
+
+export const CHIME_IDS = CATALOGUE.map((c) => c.id) as [(typeof CATALOGUE)[number]["id"], ...(typeof CATALOGUE)[number]["id"][]];
+export type ChimeId = (typeof CATALOGUE)[number]["id"];
+
+/** What the console offers: every chime with its group and name. */
+export const chimeCatalogue = () => ({ groups: CHIME_GROUPS, chimes: CATALOGUE.map(({ id, group, label }) => ({ id, group, label })) });
+
+const specOf = (id: string): ChimeSpec | undefined => CATALOGUE.find((c) => c.id === id);
+
+/** What makes a chime its own and not a copy: one semitone higher, 4% slower. */
+export const CHIME_PITCH = 2 ** (1 / 12);
+export const CHIME_SLOWDOWN = 1.04;
+
+/** One sine wave over time: breakpoints of [seconds, hertz, level]. */
+type Track = [number, number, number][];
+
+interface Measured {
+  duration: number;
+  /** Peak level of the reference, as a share of full scale. */
   peak: number;
+  /** Overall loudness of the reference every 10 ms (RMS). */
+  loudness: number[];
+  tracks: Track[];
 }
 
-/** A tone and the 3rd harmonic that gives the reference blips their rounded, slightly hollow sound. */
-const soft = (hz: number): Partial[] => [
-  { hz, gain: 1 },
-  { hz: hz * 2, gain: 0.08 },
-  { hz: hz * 3, gain: 0.45 },
-];
+const measurements = new Map<string, Measured>();
 
-/**
- * The tone of the "da-da" warning: E5 with the bright partials measured in the reference (1103, 1710, 1978 and 932 Hz) and
- * the side partials about 27 Hz either side that make it shimmer.
- */
-const shimmer = (hz: number): Partial[] => [
-  { hz, gain: 1 },
-  { hz: hz - 27, gain: 0.17 },
-  { hz: hz + 27, gain: 0.22 },
-  { hz: hz - 55, gain: 0.1 },
-  { hz: hz + 60, gain: 0.14 },
-  { hz: hz * 1.676, gain: 0.36 },
-  { hz: hz * 1.41, gain: 0.12 },
-  { hz: hz * 2.6, gain: 0.21 },
-  { hz: hz * 3.01, gain: 0.15 },
-];
-
-/** A harsh sawtooth: every harmonic of `hz` up to 8 kHz, weaker as they climb, with the 2nd and 6th stressed as in the reference. */
-function sawtooth(hz: number): Partial[] {
-  const partials: Partial[] = [];
-  for (let k = 1; k * hz < 8000; k++) partials.push({ hz: hz * k, gain: (1 / k) * (k === 2 || k === 6 ? 2.2 : 1) });
-  return partials;
+/** The measurements of a chime, read once from `assets/chimes` (next to `src` or `dist`, so it works from both). */
+function measured(id: ChimeId): Measured {
+  const cached = measurements.get(id);
+  if (cached) return cached;
+  const data = JSON.parse(readFileSync(new URL(`../../assets/chimes/${id}.json`, import.meta.url), "utf8")) as Measured;
+  measurements.set(id, data);
+  return data;
 }
 
-/** The bright stab at the start of the critical sound, from the measured partials 1267, 1250, 895, 733 and 654 Hz. */
-const STAB: Partial[] = [
-  { hz: 1267, gain: 1 },
-  { hz: 1250, gain: 0.8 },
-  { hz: 895, gain: 0.72 },
-  { hz: 733, gain: 0.33 },
-  { hz: 654, gain: 0.2 },
-  { hz: 266, gain: 0.35 },
-];
-
-const DESIGNS: Record<ChimeLevel, Design> = {
-  info: {
-    notes: [
-      { at: 0, hold: 0.12, partials: soft(293.7), attack: 0.012, decay: 0.45, release: 0.2, breath: 0.03 },
-      { at: 0.3, hold: 0.12, partials: soft(440), attack: 0.012, decay: 0.55, release: 0.45, breath: 0.03, level: 0.9 },
-    ],
-    length: 1.3,
-    pause: 0.35,
-    peak: 0.35,
-  },
-  important: {
-    notes: [
-      { at: 0, hold: 0.4, partials: shimmer(659.3), attack: 0.03, release: 0.1 },
-      { at: 0.54, hold: 0.4, partials: shimmer(659.3), attack: 0.03, release: 0.2, level: 1.05 },
-    ],
-    length: 1.3,
-    pause: 0.25,
-    peak: 0.55,
-  },
-  urgent: {
-    notes: [
-      { at: 0, hold: 0.2, partials: STAB, attack: 0.004, release: 0.05 },
-      { at: 0.22, hold: 0.68, partials: sawtooth(235.5), attack: 0.01, decay: 3, release: 0.12, chop: { hz: 14, depth: 0.35 } },
-    ],
-    length: 1.1,
-    pause: 0.15,
-    peak: 0.9,
-  },
-  override: {
-    notes: [
-      { at: 0, hold: 0.34, partials: soft(440), attack: 0.006, release: 0.02 },
-      { at: 0.46, hold: 0.24, partials: soft(440), attack: 0.006, release: 0.02 },
-    ],
-    length: 0.9,
-    pause: 0.25,
-    peak: 0.67,
-  },
-  "important-override": {
-    notes: [
-      { at: 0, hold: 0.22, partials: shimmer(659.3), attack: 0.01, release: 0.04 },
-      { at: 0.27, hold: 0.13, partials: shimmer(523.3), attack: 0.01, release: 0.04 },
-      {
-        at: 0.45,
-        hold: 0.32,
-        partials: [
-          { hz: 1262, gain: 1 },
-          { hz: 1235, gain: 0.26 },
-          { hz: 1290, gain: 0.26 },
-          { hz: 892, gain: 0.74 },
-          { hz: 659, gain: 0.54 },
-        ],
-        attack: 0.008,
-        release: 0.05,
-        chop: { hz: 27, depth: 0.2 },
-      },
-      { at: 0.82, hold: 0.2, partials: [...soft(325), ...soft(217).map((p) => ({ ...p, gain: p.gain * 0.5 }))], attack: 0.01, decay: 0.8, release: 0.2, level: 0.8 },
-    ],
-    length: 1.4,
-    pause: 0.2,
-    peak: 0.88,
-  },
-};
-
-/** A fixed noise source: chimes must sound the same every time, and tests must be able to compare them. */
-function noise(seed: number) {
-  let state = seed >>> 0 || 1;
-  return () => {
-    state ^= state << 13;
-    state >>>= 0;
-    state ^= state >>> 17;
-    state ^= state << 5;
-    state >>>= 0;
-    return state / 0x80000000 - 1;
-  };
+/** Linear interpolation of a breakpoint list [time, ...values] at `t`, held at both ends. */
+function at(points: Track, t: number): [number, number] {
+  let lo = 0;
+  let hi = points.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid]![0] <= t) lo = mid;
+    else hi = mid;
+  }
+  const a = points[lo]!;
+  const b = points[hi]!;
+  const span = b[0] - a[0];
+  const k = span > 0 ? Math.min(1, Math.max(0, (t - a[0]) / span)) : 0;
+  return [a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 }
+
+const LOUDNESS_STEP = 0.01;
 
 /** The chime as mono samples in [-1, 1] at [sampleRate], without the pause that follows it. */
-export function renderChime(level: ChimeLevel, sampleRate: number): Float32Array {
-  const design = DESIGNS[level];
-  const out = new Float32Array(Math.round(design.length * sampleRate));
-  const random = noise(level.length * 7919);
-  for (const note of design.notes) {
-    const start = Math.round(note.at * sampleRate);
-    const attack = note.attack ?? 0.005;
-    const release = note.release ?? 0.05;
-    const total = note.hold + release;
-    const strongest = note.partials.reduce((m, p) => m + p.gain, 0) || 1;
-    for (let i = 0; start + i < out.length && i / sampleRate < total; i++) {
-      const t = i / sampleRate;
-      let envelope = Math.min(1, t / attack);
-      if (note.decay) envelope *= Math.exp((-6.9 * t) / note.decay);
-      if (t > note.hold) envelope *= Math.max(0, 1 - (t - note.hold) / release);
-      if (note.chop) envelope *= 1 - note.chop.depth / 2 + (note.chop.depth / 2) * Math.sin(2 * Math.PI * note.chop.hz * t);
-      let value = 0;
-      for (const p of note.partials) value += p.gain * Math.sin(2 * Math.PI * p.hz * t);
-      value /= strongest;
-      if (note.breath) value += note.breath * random();
-      out[start + i]! += (note.level ?? 1) * envelope * value;
+export function renderChime(id: ChimeId, sampleRate: number): Float32Array {
+  const data = measured(id);
+  const out = new Float32Array(Math.round((data.duration * CHIME_SLOWDOWN + 0.05) * sampleRate));
+  // A partial above what the rate can carry would fold back into the sound as noise, so it is left out.
+  const limit = sampleRate * 0.45;
+  for (const track of data.tracks) {
+    const first = Math.max(0, Math.floor(track[0]![0] * CHIME_SLOWDOWN * sampleRate));
+    const last = Math.min(out.length - 1, Math.ceil(track[track.length - 1]![0] * CHIME_SLOWDOWN * sampleRate));
+    let phase = 0;
+    for (let i = first; i <= last; i++) {
+      const [hz, level] = at(track, i / sampleRate / CHIME_SLOWDOWN);
+      const frequency = hz * CHIME_PITCH;
+      phase += (2 * Math.PI * frequency) / sampleRate;
+      if (frequency < limit) out[i]! += level * Math.sin(phase);
     }
   }
+  shapeLoudness(out, data.loudness, sampleRate);
   // Fade the end so the chime never ends on a click.
   const fade = Math.round(0.03 * sampleRate);
   for (let i = 0; i < fade && i < out.length; i++) out[out.length - 1 - i]! *= i / fade;
   let max = 0;
   for (const v of out) max = Math.max(max, Math.abs(v));
-  const scale = max > 0 ? design.peak / max : 0;
+  const scale = max > 0 ? data.peak / max : 0;
   for (let i = 0; i < out.length; i++) out[i]! *= scale;
   return out;
+}
+
+/**
+ * Gives the synthesised chime the attack and fall of the reference: the sine waves alone are too smooth where the original
+ * strikes or fades, so each 10 ms of the chime is brought towards the loudness the reference had at that moment (limited, so
+ * it never goes far).
+ */
+function shapeLoudness(out: Float32Array, target: number[], sampleRate: number): void {
+  const step = Math.round(LOUDNESS_STEP * sampleRate);
+  const frames = Math.floor(out.length / step);
+  const gains: number[] = [];
+  for (let f = 0; f < frames; f++) {
+    let sum = 0;
+    for (let i = f * step; i < (f + 1) * step; i++) sum += out[i]! * out[i]!;
+    const mine = Math.sqrt(sum / step) + 1e-9;
+    const position = f / CHIME_SLOWDOWN;
+    const lower = Math.min(target.length - 1, Math.floor(position));
+    const upper = Math.min(target.length - 1, lower + 1);
+    const wanted = target[lower]! + (target[upper]! - target[lower]!) * (position - lower);
+    gains.push(Math.min(3, Math.max(0.35, wanted / mine)));
+  }
+  // Smooth over 5 frames, then spread between the centres of the frames.
+  const smooth = gains.map((_, f) => {
+    let total = 0;
+    let count = 0;
+    for (let k = f - 2; k <= f + 2; k++) {
+      total += gains[Math.min(gains.length - 1, Math.max(0, k))]!;
+      count++;
+    }
+    return total / count;
+  });
+  for (let i = 0; i < out.length; i++) {
+    const position = i / step - 0.5;
+    const lower = Math.min(smooth.length - 1, Math.max(0, Math.floor(position)));
+    const upper = Math.min(smooth.length - 1, lower + 1);
+    const k = Math.min(1, Math.max(0, position - lower));
+    out[i]! *= smooth[lower]! + (smooth[upper]! - smooth[lower]!) * k;
+  }
 }
 
 const toPcm = (value: number) => Math.max(-32768, Math.min(32767, Math.round(value * 32767)));
 
 /** The chime on its own, as a WAV file, to pre-listen. */
-export function chimeWav(level: ChimeLevel, sampleRate = 24_000): Buffer {
-  const samples = Int16Array.from(renderChime(level, sampleRate), toPcm);
+export function chimeWav(id: ChimeId, sampleRate = 44_100): Buffer {
+  const samples = Int16Array.from(renderChime(id, sampleRate), toPcm);
   return writeWav({ sampleRate, channels: 1, samples });
 }
 
 /**
  * Puts the chime in front of a spoken WAV: the chime, a short pause, then the voice, all at the voice's own sample rate and
- * channel count. Returns null when the voice is not a 16-bit PCM WAV, so the caller can send the voice as it is.
+ * channel count. Returns null when the voice is not a 16-bit PCM WAV or the chime is unknown (a value saved by an older
+ * version, say), so the caller can send the voice as it is.
  */
-export function prependChime(voice: Buffer, level: ChimeLevel): Buffer | null {
-  const speech: PcmWav | null = readWav(voice);
-  if (!speech) return null;
-  const chime = renderChime(level, speech.sampleRate);
-  const pause = Math.round(DESIGNS[level].pause * speech.sampleRate);
+export function prependChime(voice: Buffer, id: string): Buffer | null {
+  const spec = specOf(id);
+  const speech: PcmWav | null = spec ? readWav(voice) : null;
+  if (!spec || !speech) return null;
+  const chime = renderChime(spec.id as ChimeId, speech.sampleRate);
+  const pause = Math.round(spec.pause * speech.sampleRate);
   const frames = chime.length + pause;
   const samples = new Int16Array(frames * speech.channels + speech.samples.length);
   for (let i = 0; i < chime.length; i++) for (let c = 0; c < speech.channels; c++) samples[i * speech.channels + c] = toPcm(chime[i]!);

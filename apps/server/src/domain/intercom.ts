@@ -1,7 +1,7 @@
 import { ulid } from "@smartcampus/protocol";
 import { HttpError } from "../lib/errors.js";
 import { sniffAudio } from "../lib/audioSniff.js";
-import { prependChime, type ChimeLevel } from "../lib/chimes.js";
+import { prependChime, type ChimeId } from "../lib/chimes.js";
 import { recordAudit } from "../lib/audit.js";
 import { AnnouncementModel } from "../models/announcement.js";
 import { config } from "../config.js";
@@ -70,8 +70,8 @@ export interface SpeechInput {
   voice?: string;
   /** Pace, 1 being natural. */
   speed?: number;
-  /** A chime played before the voice, by severity. Left out for none. */
-  chime?: ChimeLevel;
+  /** A chime played before the voice (see `lib/chimes.ts`). Left out for none. */
+  chime?: ChimeId;
 }
 
 /**
@@ -97,9 +97,9 @@ function pickVoice(input: SpeechInput) {
  * The voice with its chime in front. An engine that does not return a 16-bit WAV when asked cannot be joined to a chime
  * without a decoder, so the voice goes out as it is: an announcement without its chime is better than none.
  */
-function withChime(spoken: Buffer, level: ChimeLevel): Buffer {
-  const joined = prependChime(spoken, level);
-  if (!joined) console.warn(`chime "${level}" skipped: the text-to-speech engine did not return a 16-bit WAV`);
+function withChime(spoken: Buffer, chime: ChimeId): Buffer {
+  const joined = prependChime(spoken, chime);
+  if (!joined) console.warn(`chime "${chime}" skipped: unknown chime, or the text-to-speech engine did not return a 16-bit WAV`);
   return joined ?? spoken;
 }
 
