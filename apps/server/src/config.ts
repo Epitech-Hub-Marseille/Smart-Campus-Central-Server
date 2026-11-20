@@ -59,6 +59,8 @@ const schema = z.object({
     .optional()
     .refine((k) => !k || Buffer.from(k, "base64").length === 32, "TWO_FACTOR_KEY must be 32 bytes, base64 encoded"),
   TWO_FACTOR_ISSUER: z.string().trim().min(1).max(40).default("Smart Campus"),
+  // How long a device may stay disconnected before administrators and operators are alerted. 0 turns the alert off.
+  DEVICE_OFFLINE_ALERT_SECONDS: z.coerce.number().int().min(0).default(120),
   REQUIRE_ADMIN_2FA: z
     .enum(["true", "false"])
     .default("true")

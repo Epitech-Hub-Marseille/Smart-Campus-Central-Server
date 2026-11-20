@@ -2,7 +2,9 @@ import mongoose from "mongoose";
 import { formatFingerprint } from "@smartcampus/handshake";
 import { createApp } from "./app.js";
 import { config } from "./config.js";
+import { watchDevices } from "./domain/deviceAlerts.js";
 import { attachGateway } from "./gateway/index.js";
+import { registry } from "./gateway/registry.js";
 import { startScheduler } from "./jobs/scheduler.js";
 import { ttsEngine } from "./infra/tts.js";
 import { loadServerKey } from "./infra/serverKey.js";
@@ -34,9 +36,11 @@ const gateway = attachGateway(server, {
 });
 
 const stopScheduler = startScheduler();
+const stopWatching = config.DEVICE_OFFLINE_ALERT_SECONDS > 0 ? watchDevices(registry, config.DEVICE_OFFLINE_ALERT_SECONDS * 1000) : () => {};
 
 async function shutdown() {
   stopScheduler();
+  stopWatching();
   gateway.close();
   server.close();
   await mongoose.disconnect();

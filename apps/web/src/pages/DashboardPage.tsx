@@ -1,15 +1,16 @@
-import { Building2, CalendarDays, DoorOpen, Megaphone, Radio, Siren, Users } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { Building2, CalendarDays, DoorOpen, Download, Megaphone, Radio, Siren, Users, WifiOff } from "lucide-react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { canEditCampus, useAuth } from "@/auth/AuthContext";
 import { ConnectionBadge } from "@/components/DeviceBadges";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useDeviceStatus } from "@/lib/DeviceStatus";
 import { SECTIONS, itemsFor } from "@/lib/sections";
 import { useFetch } from "@/lib/useFetch";
-import { DEVICE_TYPE_LABEL, PRIORITY_LABEL, timeAgo, type Announcement, type Building, type Device, type Emergency, type Page, type Reservation, type StaffMember } from "@/lib/types";
+import { DEVICE_TYPE_LABEL, PRIORITY_LABEL, timeAgo, type Announcement, type Building, type Device, type Emergency, type Overview, type Page, type Reservation, type StaffMember } from "@/lib/types";
 
 function Stat({ to, icon, label, value, hint }: { to: string; icon: ReactNode; label: string; value: number | string; hint?: string }) {
   return (
@@ -45,6 +46,16 @@ function Box({ title, to, linkLabel = "Open", className, children }: { title: st
   );
 }
 
+const EXPORTS: { id: string; label: string; admin?: boolean }[] = [
+  { id: "devices", label: "Devices" },
+  { id: "announcements", label: "Announcements" },
+  { id: "reservations", label: "Reservations" },
+  { id: "room-statuses", label: "Room status changes" },
+  { id: "emergencies", label: "Emergencies" },
+  { id: "messages", label: "Messages" },
+  { id: "audit", label: "Audit log", admin: true },
+];
+
 const Empty = ({ children }: { children: ReactNode }) => <p className="text-sm text-muted-foreground">{children}</p>;
 
 export function DashboardPage() {
@@ -56,6 +67,14 @@ export function DashboardPage() {
   const devices = useFetch<{ items: Device[] }>(manager ? "/devices" : null);
   const announcements = useFetch<Page<Announcement>>(manager ? "/announcements?kind=text&limit=50" : null);
   const emergencies = useFetch<Page<Emergency>>(manager ? "/emergencies?status=active&limit=10" : null);
+  const overview = useFetch<Overview>(manager ? "/stats/overview" : null);
+  const reloadOverview = overview.reload;
+  // Devices drop and come back while the page is open, so the figures are asked for again every minute.
+  useEffect(() => {
+    if (!manager) return;
+    const timer = setInterval(reloadOverview, 60_000);
+    return () => clearInterval(timer);
+  }, [manager, reloadOverview]);
   // Rounded to the minute so the request key stays stable between renders.
   const from = useMemo(() => new Date(Math.floor(Date.now() / 60_000) * 60_000).toISOString(), []);
   const reservations = useFetch<Page<Reservation>>(`/reservations?limit=6&from=${encodeURIComponent(from)}`);
@@ -81,6 +100,29 @@ export function DashboardPage() {
             </CardContent>
           </Card>
         </Link>
+      )}
+
+      {manager && (overview.data?.devices.offline.length ?? 0) > 0 && (
+        <Card className="border-destructive/40 py-4" role="status">
+          <CardContent className="flex items-start gap-3 text-sm">
+            <WifiOff className="mt-0.5 size-5 shrink-0 text-destructive" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <div className="font-medium">
+                {overview.data!.devices.offline.length} device{overview.data!.devices.offline.length === 1 ? " is" : "s are"} offline
+              </div>
+              <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
+                {overview.data!.devices.offline.slice(0, 8).map((d) => (
+                  <li key={d.id}>
+                    <Link to={`/devices/${d.id}`} className="underline-offset-4 hover:text-foreground hover:underline">
+                      {d.name}
+                    </Link>{" "}
+                    <span className="text-xs">({timeAgo(d.lastSeenAt)})</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
@@ -155,6 +197,65 @@ export function DashboardPage() {
           </Box>
         )}
       </div>
+
+      {manager && overview.data && (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Box title="Rooms by status" to="/rooms" linkLabel="Rooms">
+            {overview.data.rooms.byStatus.length === 0 ? (
+              <Empty>No room yet.</Empty>
+            ) : (
+              <ul className="space-y-2.5">
+                {overview.data.rooms.byStatus.map((s) => (
+                  <li key={s.key} className="text-sm">
+                    <div className="mb-1 flex justify-between">
+                      <span>{s.label}</span>
+                      <span className="tabular-nums text-muted-foreground">{s.count}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-accent" aria-hidden>
+                      <div className="h-full rounded-full" style={{ width: `${(s.count / overview.data!.rooms.total) * 100}%`, background: s.color ?? "var(--primary)" }} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-4 text-xs text-muted-foreground">
+              {overview.data.reservations.today} booking{overview.data.reservations.today === 1 ? "" : "s"} today · {overview.data.devices.pending} connection request{overview.data.devices.pending === 1 ? "" : "s"} waiting
+            </p>
+          </Box>
+
+          <Box title="Recent activity" to={user?.role === "admin" ? "/audit" : undefined} linkLabel="Audit log" className="lg:col-span-2">
+            {user?.role !== "admin" ? (
+              <Empty>The audit log is for administrators.</Empty>
+            ) : overview.data.activity.length === 0 ? (
+              <Empty>Nothing recorded yet.</Empty>
+            ) : (
+              <ul className="divide-y">
+                {overview.data.activity.map((a) => (
+                  <li key={a.id} className="flex items-center gap-3 py-2 text-sm">
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="font-medium">{a.actor}</span> <span className="font-mono text-xs text-muted-foreground">{a.action}</span>
+                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(a.at)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Box>
+
+          <Box title="Export statistics" className="lg:col-span-3">
+            <p className="mb-3 text-sm text-muted-foreground">Download what the platform recorded as a spreadsheet (CSV, opens in Excel).</p>
+            <div className="flex flex-wrap gap-2">
+              {EXPORTS.filter((e) => !e.admin || user?.role === "admin").map((e) => (
+                <Button key={e.id} variant="outline" size="sm" asChild>
+                  <a href={`/api/stats/export/${e.id}`} download>
+                    <Download /> {e.label}
+                  </a>
+                </Button>
+              ))}
+            </div>
+          </Box>
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {SECTIONS.filter((s) => s.items.length > 0 && (manager || !s.managerOnly)).map((s) => (

@@ -4,7 +4,9 @@ import { ProtectedRoute } from "@/auth/ProtectedRoute";
 import { AppLayout } from "@/components/AppLayout";
 import { EmergencyPage } from "@/pages/EmergencyPage";
 import { AvailabilityPage } from "@/pages/AvailabilityPage";
+import { AuditPage } from "@/pages/AuditPage";
 import { MediaPage } from "@/pages/MediaPage";
+import { MessagesPage } from "@/pages/MessagesPage";
 import { NewsPage } from "@/pages/NewsPage";
 import { ScreensPage } from "@/pages/ScreensPage";
 import { ReservationsPage } from "@/pages/ReservationsPage";
@@ -48,6 +50,7 @@ export default function App() {
               <Route path="/buildings" element={<BuildingsPage />} />
               <Route path="/reservations" element={<ReservationsPage />} />
               <Route path="/availability" element={<AvailabilityPage />} />
+              <Route path="/messages" element={<MessagesPage />} />
               <Route element={<ProtectedRoute roles={["admin", "operator"]} />}>
                 <Route path="/devices" element={<DevicesPage />} />
                 <Route path="/devices/:id" element={<DeviceDetailPage />} />
@@ -64,6 +67,7 @@ export default function App() {
                 <Route path="/staff" element={<StaffPage />} />
                 <Route element={<ProtectedRoute roles={["admin"]} />}>
                   <Route path="/api-keys" element={<ApiKeysPage />} />
+                  <Route path="/audit" element={<AuditPage />} />
                 </Route>
                 <Route path="/students" element={<StudentsPage />} />
                 <Route path="/import" element={<ImportPage />} />
