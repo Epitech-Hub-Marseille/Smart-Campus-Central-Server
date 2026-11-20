@@ -1,4 +1,4 @@
-import { LogOut, Menu, ShieldCheck, X } from "lucide-react";
+import { Bell, LogOut, Menu, ShieldCheck, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { canEditCampus, useAuth } from "@/auth/AuthContext";
@@ -8,18 +8,23 @@ import { Notifications } from "@/components/Notifications";
 import { DeviceStatusProvider, useOptionalDeviceStatus } from "@/lib/DeviceStatus";
 import { SECTIONS, itemsFor, sectionFor, type Section } from "@/lib/sections";
 import { ROLE_LABEL } from "@/lib/types";
+import { UnreadProvider, useUnread } from "@/lib/unread";
 import { cn } from "@/lib/utils";
 
 export function AppLayout() {
   const { user } = useAuth();
   if (!user) return null;
   // The live device channel is only open to admins and operators.
-  return canEditCampus(user) ? (
-    <DeviceStatusProvider>
-      <Shell />
-    </DeviceStatusProvider>
-  ) : (
-    <Shell />
+  return (
+    <UnreadProvider>
+      {canEditCampus(user) ? (
+        <DeviceStatusProvider>
+          <Shell />
+        </DeviceStatusProvider>
+      ) : (
+        <Shell />
+      )}
+    </UnreadProvider>
   );
 }
 
@@ -86,6 +91,7 @@ const panelActive = "bg-accent text-foreground";
 function Shell() {
   const { user, logout } = useAuth();
   const status = useOptionalDeviceStatus();
+  const { unread } = useUnread();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -139,8 +145,21 @@ function Shell() {
             <span className="hidden text-sm text-muted-foreground md:block">
               Smart Campus <span aria-hidden>/</span> <span className="text-foreground">{current.label}</span>
             </span>
+            <Link
+              to="/messages"
+              aria-label={unread > 0 ? `Messages, ${unread} unread` : "Messages"}
+              title="Messages"
+              className={cn("relative ml-auto rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground", focusRing)}
+            >
+              <Bell className="size-4" />
+              {unread > 0 && (
+                <span className="absolute top-0.5 right-0.5 grid min-w-4 place-items-center rounded-full bg-primary px-1 text-[10px] leading-4 font-medium text-primary-foreground">
+                  {unread > 99 ? "99+" : unread}
+                </span>
+              )}
+            </Link>
             {status && (
-              <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground" title={status.live ? "Receiving live updates from the server" : "Live updates are interrupted, reconnecting"}>
+              <span className="flex items-center gap-2 text-xs text-muted-foreground" title={status.live ? "Receiving live updates from the server" : "Live updates are interrupted, reconnecting"}>
                 <span className={cn("size-2 rounded-full", status.live ? "bg-primary" : "bg-muted-foreground")} aria-hidden />
                 {status.live ? "Live" : "Reconnecting"}
               </span>

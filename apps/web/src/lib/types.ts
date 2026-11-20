@@ -553,3 +553,39 @@ export interface AssetUse {
   name: string;
   as: "logo" | "tile";
 }
+
+export interface InboxMessage {
+  id: string;
+  subject: string;
+  body: string;
+  priority: AnnouncePriority;
+  sender: string;
+  sentAt: string;
+  readAt: string | null;
+}
+
+export interface SentMessage extends InboxMessage {
+  audience: { kind: "everyone" | "roles" | "users"; roles: Role[]; count: number };
+  recipientCount: number;
+  readCount: number;
+  recipients?: { userId: string; name: string; readAt: string | null }[];
+}
+
+export interface AuditEntry {
+  id: string;
+  at: string;
+  actor: string;
+  action: string;
+  target: { type: string; id: string };
+  meta: Record<string, unknown>;
+}
+
+export interface Overview {
+  devices: { active: number; online: number; pending: number; offline: { id: string; name: string; type: DeviceType; lastSeenAt: string | null }[] };
+  rooms: { total: number; byStatus: { key: string; label: string; color: string | null; count: number }[] };
+  announcements: { active: number };
+  emergencies: { active: number };
+  reservations: { today: number };
+  people: { total: number };
+  activity: { id: string; at: string; actor: string; action: string; target: string }[];
+}

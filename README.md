@@ -51,6 +51,8 @@ The single `pnpm-lock.yaml` at the root is committed.
 | Faculty screens | The information board of the reference design (events of the day, booked rooms, announcements, a news ticker) plus staff availability (updated by the staff themselves, filtered by service), with carousel, clock, date and weather widgets. The screen application is in its own repository, `SmartCampus-FacultyScreens` |
 | Faculty screens | Screens grouped and configured by level (default, group, screen: the most specific wins, field by field). A carousel of scenes, each a layout of tiles: news, staff, reservations, images, videos, texts, web pages, live radio, live video streams and YouTube. A media library with folders, rename, replace and usage |
 | Portal integrations | Plugins read events from ENT, student portals and administration systems (first: Epitech MY). Events become reservations, the people they name are matched to or registered as staff and shown as busy during the event |
+| Messages | Internal notices to everyone, a role or chosen people, with a read receipt per person; the system posts there too (a device that stays offline) |
+| Audit log and statistics | Read-only audit viewer (administrators), live overview figures, and CSV exports of devices, announcements, reservations, room status changes, emergencies, messages and the audit log |
 | Reservations | Book a room without conflicts; the door screen shows the next booking and Faculty screens list the day |
 | Display config | Layout, theme, visible elements and night sleep per screen, validated by the shared schema, duplicated to several screens |
 | Audit | `auditLogs` entries for device approval/revocation, status changes, announcements, emergency alerts, uploads, broadcasts and configuration changes (the viewer is #27) |
@@ -83,6 +85,7 @@ decision, so the shipped implementation speaks the OpenAI `POST /audio/speech` A
   server, so the devices play one file and need no change. To join them without a decoder the server asks the engine for `wav`; an engine that does not return a
   16-bit PCM WAV, or an unknown chime, gets the voice sent as it is, with a warning in the log. `GET /api/intercom/chimes` lists them by group and
   `GET /api/intercom/chimes/:id` returns one to pre-listen to.
+  **Emergencies** read their alert aloud after a chime of their own for each kind (`EMERGENCY_CHIMES` in `domain/emergencies.ts`: fire Buzz warning, bomb Dee-oo, nuclear Important manual override, biohazard Manual override, seismic Da-de-da, power Da-da C), and the all-clear after the calm information chime Doop. The read-out is made louder first (`lib/speechGain.ts`: gain to a fixed average level with a soft limiter, never a hard clip), and on the devices the alarm steps back while it speaks (Faculty: a fifth of its level and muffled above 700 Hz; door: a fifth of its level).
 
 **Schedules** (`/schedules`, admins and operators). A schedule announces a text (on screens) or a voice, at a time or on an event:
 
