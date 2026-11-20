@@ -18,6 +18,7 @@ import { devicesRouter, enrollRouter } from "./routes/devices.js";
 import { emergenciesRouter } from "./routes/emergencies.js";
 import { facultyRouter } from "./routes/faculty.js";
 import { importRouter } from "./routes/import.js";
+import { integrationsRouter } from "./routes/integrations.js";
 import { intercomRouter } from "./routes/intercom.js";
 import { reservationsRouter } from "./routes/reservations.js";
 import { schedulesRouter } from "./routes/schedules.js";
@@ -73,6 +74,7 @@ export function createApp(options: { serverPublicKey?: string } = {}) {
   api.use("/assets", assetsRouter);
   api.use("/emergencies", emergenciesRouter);
   api.use("/intercom", intercomRouter);
+  api.use("/integrations", integrationsRouter);
   api.use("/rooms", roomsRouter);
   api.use("/room-statuses", roomStatusesRouter);
   api.use("/api-keys", apiKeysRouter);

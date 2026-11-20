@@ -96,6 +96,8 @@ const userSchema = new Schema(
     jobTitle: { type: String, trim: true },
     phone: { type: String, trim: true },
     disabled: { type: Boolean, default: false },
+    // Where an account that was not created by a person came from ("integration:<id>"): such an account has no way to sign in.
+    source: { type: String },
     twoFactor: { type: twoFactorSchema },
   },
   { timestamps: true },

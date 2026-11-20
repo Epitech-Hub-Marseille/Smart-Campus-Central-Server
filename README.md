@@ -45,11 +45,12 @@ The single `pnpm-lock.yaml` at the root is committed.
 | Two-factor authentication | Authenticator-app codes (TOTP, RFC 6238). Administrators must set it up before the console lets them do anything else; everyone else may. Ten single-use recovery codes, a lockout after five wrong codes, and a reset by another administrator. Every emergency alert, test or real, asks for a fresh code. |
 | Themes | A theme is JSON tokens (colours, a font family from a fixed list, a text scale, a corner radius) that door units and Faculty screens both apply, plus optional CSS for the Faculty screens. Set for all of a kind, a group or one device; the most specific wins. |
 | API keys | Keys for other applications to use the official API, each with only the scopes it needs, a required end date (at most one year), instant revocation and a usage log. Created by administrators with a fresh authenticator code, shown once, stored hashed. |
-| Emergency alerts | Fire, biohazard, radiation leak, bomb threat, earthquake and power cut. Takes over the door screens (door code, chevrons towards the emblem, procedure) and loops a synthesised alarm until ended. Test mode shows a TEST tag and plays at a chosen volume. Kept in the digital twin, so an offline screen sounds the alarm when it reconnects and stops if the alert ended meanwhile. A real alert needs two steps enforced by the API, can also be read aloud, and ends with a message shown on the screens (see [Emergency alerts](#emergency-alerts)) |
+| Emergency alerts | Fire, biohazard, radiation leak, bomb threat, earthquake and power cut. Takes over the door screens and the Faculty screens with a terminal-style bulletin (the alert in yellow on the dark colour of its kind, the order to follow, numbered steps, hazard stripes) and loops a synthesised alarm until ended. Test mode shows a TEST tag and plays at a chosen volume. Kept in the digital twin, so an offline screen sounds the alarm when it reconnects and stops if the alert ended meanwhile. A real alert needs two steps enforced by the API, can also be read aloud, and ends with a message shown on the screens (see [Emergency alerts](#emergency-alerts)) |
 | InterCom | Record or import a sound (stored in GridFS, WAV/MP3/Ogg/WebM/M4A, `MAX_AUDIO_MB`), broadcast it to chosen devices. Devices download it over a request signed with their key. Volume and quiet hours per device. **Voice announcements**: type a text, choose a language and a voice, listen to it, then broadcast it (see [Voice and schedules](#voice-announcements-schedules-and-templates)) |
 | Schedules and templates | Announcements that send themselves once, daily, weekly, or when a room changes status; a library of reusable announcement texts |
 | Faculty screens | The information board of the reference design (events of the day, booked rooms, announcements, a news ticker) plus staff availability (updated by the staff themselves, filtered by service), with carousel, clock, date and weather widgets. The screen application is in its own repository, `SmartCampus-FacultyScreens` |
 | Faculty screens | Screens grouped and configured by level (default, group, screen: the most specific wins, field by field). A carousel of scenes, each a layout of tiles: news, staff, reservations, images, videos, texts, web pages, live radio, live video streams and YouTube. A media library with folders, rename, replace and usage |
+| Portal integrations | Plugins read events from ENT, student portals and administration systems (first: Epitech MY). Events become reservations, the people they name are matched to or registered as staff and shown as busy during the event |
 | Reservations | Book a room without conflicts; the door screen shows the next booking and Faculty screens list the day |
 | Display config | Layout, theme, visible elements and night sleep per screen, validated by the shared schema, duplicated to several screens |
 | Audit | `auditLogs` entries for device approval/revocation, status changes, announcements, emergency alerts, uploads, broadcasts and configuration changes (the viewer is #27) |
@@ -74,6 +75,14 @@ decision, so the shipped implementation speaks the OpenAI `POST /audio/speech` A
   If the container falls back to CPU or fails on an older GPU, see its logs: the image's CUDA build must support your card.
 - The text is limited to 1000 characters and synthesis is rate-limited per person (20 a minute). The reply must really be audio (sniffed)
   and not larger than `MAX_AUDIO_MB`. The engine's error text is never passed to the console.
+- **Chimes.** A voice can start with a chime that tells how serious the announcement is (`chime` in the InterCom form and in scheduled voice content, one of the
+  11 below). They are composed in `lib/chimes.ts` as a few clean notes (sine partials with an attack, a decay and a release), read off the reference sounds of `docs/inspiration/chimes`: the number of notes, the intervals, the rhythm and the kind of tone (soft, bell, buzz, pure beep) follow the reference, but each chime sits on pitches of its own and nothing of any recording is stored. The groups are **information**
+  (`info-bloop`, `info-doop`, `info-dudu`: soft blips), **warning** (`warning-dadaa`, `-dadab`, `-dadac`, `-dadeda`: held "da-da" tones), **critical**
+  (`critical-buzwarn`, `critical-deeoo`: a buzz and a falling stab) and **manual override** (`manual-override`, `important-manual-override`). The more serious, the
+  louder and rougher, and the shorter the pause before the voice (0.35 s, 0.25 s, 0.15 s, 0.2 s). A chime is built at the rate of the voice and joined to it on the
+  server, so the devices play one file and need no change. To join them without a decoder the server asks the engine for `wav`; an engine that does not return a
+  16-bit PCM WAV, or an unknown chime, gets the voice sent as it is, with a warning in the log. `GET /api/intercom/chimes` lists them by group and
+  `GET /api/intercom/chimes/:id` returns one to pre-listen to.
 
 **Schedules** (`/schedules`, admins and operators). A schedule announces a text (on screens) or a voice, at a time or on an event:
 
@@ -135,6 +144,32 @@ default use it). The kind and type are decided from the file's first bytes: PNG,
 audio-only MP4. A file that a playlist or a logo uses cannot be deleted; the error says where. File references (`assetId`, `sha256`, `size`, `mime`) are
 built from the library on the server, never from the request. A screen downloads a file with a signed request, as for sounds, and only a file its own
 carousel or logo names (`audio.play`, `carousel.set` and `faculty.config.set` are what authorise a download).
+
+## Portal integrations
+
+The campus reads the events of its ENT, student portals and administration systems through **plugins**, one per kind of portal. A plugin does one
+thing: given a time window, it returns the events of its portal in a fixed shape (`apps/server/src/integrations/types.ts`). Everything after that is the same for
+every plugin (`domain/integrations.ts`), so a new portal is one file in `integrations/plugins/` and one line in `integrations/registry.ts`.
+
+- **What a reading does.** Events from the start of today to `horizonDays` ahead (14 by default) are stored; an event the portal stops listing is cancelled. An event whose
+  place matches a room (by room name or code, ignoring case and accents, or by an alias set on the integration) becomes a **reservation** under `source: integration:<id>`,
+  so doors and Faculty screens show it with no change. **Places** that match no room can be settled in the console (Integrations, the door icon): choose
+  the room, make a room for the place (name and code from the portal, in a chosen building and floor, kind guessed from words like "Réunion" or "Bureau"), or say it is not
+  a room. A choice applies at once to the events already read. An integration can also **create the missing rooms by itself** at every reading (`autoCreateRooms`, in
+  `autoCreateBuildingId` on `autoCreateFloor`). Video calls ("distanciel", "Teams", "Zoom"…) are never rooms. Endpoints: `GET` and `PUT /api/integrations/:id/places`. These are written without the conflict check of a person's booking, since the portal is the truth.
+- **People.** An event's organiser and attendees are matched to accounts by email, then by an exact name that only one account has. The reservation then carries that
+  person's name. Someone with an email and no account is **registered** (no password, no way to sign in, source `integration:<id>`, listed on the Faculty screens under the
+  integration's service) unless the integration turns that off or the event names more than 10 people (a class list, not staff).
+- **Busy.** Someone named by an event that is running shows as **busy** on the Faculty screens, with the title of the event, until it ends. What the person or an administrator
+  sets always wins, including "available", which then lasts until the event ends. The screens are told when someone starts or finishes an event.
+- **Settings are secret.** A setting that is a key (the link of a calendar export holds a token) is stored encrypted (`lib/secretBox.ts`) and never returned. Only administrators
+  change integrations; operators can see what was read. A reading's error is kept on the integration and never repeats a secret. Nothing here is open to API keys.
+- **Timer.** Enabled integrations are read when due (`intervalMinutes`, 5 to 1440) by the scheduler; `POST /api/integrations/:id/sync` reads one now. A reading holds a lock so two never overlap.
+- **Endpoints** (`/api/integrations`): `GET /plugins`, `GET /`, `POST /`, `PATCH /:id`, `DELETE /:id` (removes its events and reservations, keeps registered accounts), `POST /:id/sync`,
+  `GET /events`. Console: Administration, Integrations.
+- **Epitech MY** (`epitech-my`): the calendar export of the MY platform, an iCalendar file (`https://my.epitech.eu/api/events/calendar/<token>?campus=MAR`). It only talks to
+  `my.epitech.eu` over https, follows no redirects and caps the size of the file. **That file carries no names of teachers or students**, only the title, time, rooms and a
+  description, so with it alone no account is registered and nobody is shown busy: people appear when a calendar names them (organiser and attendee lines, or an email in the text).
 
 ## Reservations
 
@@ -275,9 +310,29 @@ A theme gives the door units and the Faculty screens a look of their own. It is 
 from a fixed list (system, sans, serif, mono, condensed: an arbitrary font cannot be assumed to exist on a device), a text scale from 0.8 to 1.4 and a
 corner radius from 0 to 32. Whatever a theme leaves out keeps the app's own look, and a device ignores a token it does not know.
 
+- **Fonts are files, not CSS.** A theme may name one font file for each slot: `body`, `heading` and `mono` (WOFF2, WOFF, TTF or OTF, up to
+  2 MB, uploaded with `POST /api/assets/font?name=` and judged by their bytes, never by the content type). The theme sends each as an asset
+  reference (id, SHA-256, size); a device downloads it with a signed request, checks the hash and registers it as the family `sc-body`,
+  `sc-heading` or `sc-mono`. Faculty screens also expose them to the theme CSS as `--font-body`, `--font-heading` and `--font-mono` (set only
+  for a slot that has a file; `var(--font-heading, <fallback>)` is the safe way to read one). A slot without a file, or whose download fails,
+  keeps the font family of the tokens. A font used by a theme cannot be deleted or replaced, and a device can only download the fonts of the
+  theme it was sent.
+- **Theme bundles.** `POST /api/themes/import` (raw .zip body, at most 8 MB, admins and operators) creates a theme and puts its fonts in the
+  library in one upload; `?replace=1` turns a theme of the same name into a new version. The .zip holds `theme.json` (`name`, `description`,
+  `tokens`, optional `css`, optional `fontNames` mapping a slot to a font file name), the font files in any folder, and optionally one `.css`
+  file used when `theme.json` has no `css`. Everything is checked before anything is stored (at most 32 files, fonts 2 MB, sizes checked before
+  unpacking, nothing written to disk), a font already in the library with the same bytes is reused, and the console has an Import ZIP button.
 - **CSS is checked** by the server and again by the device: at most 12,000 characters, no `url()`, `@import`, `@font-face`, `expression()`,
   `javascript:` or escape sequences, balanced braces, nothing that could close its own `<style>`. Nothing can be loaded from elsewhere.
-- **Emergency alerts and the end-of-alert notice are never themed.** A Faculty screen removes the theme's CSS while one is showing.
+- **Emergency alerts keep their identity.** An alert is a terminal-style bulletin (bold monospace, white double frame, yellow on the dark colour of its
+  kind, a numbered list of steps, hazard stripes) on the door units and the Faculty screens. Its wording, its alarm and its white and yellow text are
+  never themed, and a Faculty screen removes the theme's CSS, colours and text size while an alert or the end-of-alert notice shows. A theme may only
+  dress it through a small, closed `emergency` section (not CSS): `fonts` (use the theme's font files), `frame` (`stripes`, the default, or a plain
+  yellow `bar`), `radius` (corners, 0 to 32) and `colors.background` / `colors.card` (the page, and the panel behind the steps on Faculty screens).
+  A colour must keep white text readable: a contrast of at least 4.5:1 (WCAG, large text), refused by the server otherwise. **Fallback to the default
+  alert:** a device that cannot read the section, finds a colour too light, or cannot draw the themed alert (a Faculty screen catches a render error)
+  shows the default alert, and a font that fails to load falls back to the default fonts. The rest of the theme is kept. A theme with no `emergency`
+  section sends nothing about alerts.
 - **Which theme applies.** `PUT /api/themes/assignments {scope, key, themeId|null}` with scope `device`, `group` (a device group) or `default` (key `door`
   or `display`). A device wears, in this order, its own theme, the theme of its group (the first in alphabetical order if it is in several), the
   default for its kind, or nothing. `GET /api/themes/resolve/:deviceId` says which and why.

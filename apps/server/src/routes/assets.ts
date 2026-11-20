@@ -4,7 +4,7 @@ import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { config } from "../config.js";
-import { deleteAsset, normalizeFolder, replaceMediaAsset, storeAudioAsset, storeMediaAsset, updateMediaAsset, wasAssetSentTo } from "../domain/assets.js";
+import { deleteAsset, normalizeFolder, replaceMediaAsset, storeAudioAsset, storeFontAsset, storeMediaAsset, updateMediaAsset, wasAssetSentTo } from "../domain/assets.js";
 import { assetUsage } from "../domain/screens.js";
 import { activePublicKey } from "../domain/devices.js";
 import { openFile } from "../infra/gridfs.js";
@@ -18,6 +18,9 @@ const rawUpload = express.raw({ type: () => true, limit: `${config.MAX_AUDIO_MB}
 
 /** Images and videos are bigger than sounds, so they have their own limit. */
 const rawMedia = express.raw({ type: () => true, limit: `${config.MAX_MEDIA_MB}mb` });
+
+/** Fonts are small; the limit sits just above the one the protocol states, which storeFontAsset enforces with a clear message. */
+const rawFont = express.raw({ type: () => true, limit: "3mb" });
 
 const downloadLimiter = rateLimit({
   windowMs: 60_000,
@@ -68,7 +71,7 @@ const canWrite = requireRole("admin", "operator");
 assetsRouter.get("/", async (req, res) => {
   // Without a kind, the sound library, as before: a screen that lists sounds must not suddenly list videos.
   // "media" is the content library: images and videos together.
-  const kind = z.enum(["audio", "image", "video", "media"]).default("audio").parse(req.query.kind);
+  const kind = z.enum(["audio", "image", "video", "media", "font"]).default("audio").parse(req.query.kind);
   const filter = kind === "audio" ? { $or: [{ kind: "audio" }, { kind: { $exists: false } }] } : kind === "media" ? { kind: { $in: ["image", "video"] } } : { kind };
   const items = await AssetModel.find(filter).sort({ createdAt: -1 }).limit(500);
   res.json({ items: items.map(assetDto), folders: [...new Set(items.map((a) => a.folder).filter(Boolean))].sort() });
@@ -80,6 +83,14 @@ assetsRouter.post("/media", canWrite, rawMedia, async (req, res) => {
   if (!name) throw new HttpError(400, "name is required");
   if (!Buffer.isBuffer(req.body)) throw new HttpError(400, "Send the file as the request body");
   res.status(201).json(assetDto(await storeMediaAsset(req.body, name, req.user!, normalizeFolder(req.query.folder))));
+});
+
+/** Upload a font for themes. */
+assetsRouter.post("/font", canWrite, rawFont, async (req, res) => {
+  const name = typeof req.query.name === "string" ? req.query.name.trim().slice(0, 100) : "";
+  if (!name) throw new HttpError(400, "name is required");
+  if (!Buffer.isBuffer(req.body)) throw new HttpError(400, "Send the font file as the request body");
+  res.status(201).json(assetDto(await storeFontAsset(req.body, name, req.user!)));
 });
 
 const renameInput = z.object({ name: z.string().trim().min(1).max(100).optional(), folder: z.string().max(40).optional() }).strict();

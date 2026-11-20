@@ -371,7 +371,7 @@ export type ScheduleTrigger =
 export interface Schedule {
   id: string;
   name: string;
-  content: { kind: "text" | "voice"; title: string; text: string; priority: AnnouncePriority; voice: string; expiresAfterMinutes?: number };
+  content: { kind: "text" | "voice"; title: string; text: string; priority: AnnouncePriority; voice: string; chime?: string; expiresAfterMinutes?: number };
   trigger: ScheduleTrigger;
   targets: Targets | null;
   enabled: boolean;

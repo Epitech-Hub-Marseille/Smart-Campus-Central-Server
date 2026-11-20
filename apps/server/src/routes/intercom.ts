@@ -3,6 +3,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireRole } from "../auth/middleware.js";
 import { broadcastAudio, emergencyVoiceId, MAX_SPEECH_CHARS, previewSpeech, speak } from "../domain/intercom.js";
+import { CHIME_IDS, chimeCatalogue, chimeWav } from "../lib/chimes.js";
 import { targetsInput } from "../domain/targeting.js";
 import { ttsEngine } from "../infra/tts.js";
 
@@ -21,6 +22,7 @@ intercomRouter.post("/broadcasts", async (req, res) => {
 const speechInput = z.object({
   text: z.string().trim().min(1).max(MAX_SPEECH_CHARS),
   voice: z.string().min(1).max(60).optional(),
+  chime: z.enum(CHIME_IDS).optional(),
 });
 
 // Each synthesis costs money or CPU on the engine, so it is limited per person, not per address.
@@ -37,6 +39,20 @@ const synthesisLimiter = rateLimit({
 intercomRouter.get("/voices", (_req, res) => {
   const engine = ttsEngine();
   res.json({ enabled: Boolean(engine), maxChars: MAX_SPEECH_CHARS, voices: engine?.voices() ?? [], emergencyVoice: emergencyVoiceId() ?? engine?.voices()[0]?.id ?? null });
+});
+
+/** The chimes the console offers, by group. */
+intercomRouter.get("/chimes", (_req, res) => {
+  res.json(chimeCatalogue());
+});
+
+/** Pre-listening to a chime on its own. */
+intercomRouter.get("/chimes/:id", (req, res) => {
+  const id = z.enum(CHIME_IDS).parse(req.params.id);
+  res.setHeader("Content-Type", "audio/wav");
+  // Not cached for an hour: the chimes change with the server, and a browser that kept the old one would play it after an update.
+  res.setHeader("Cache-Control", "no-cache");
+  res.send(chimeWav(id));
 });
 
 /** Pre-listening: audio for the text, nothing stored and nothing sent to a screen. */

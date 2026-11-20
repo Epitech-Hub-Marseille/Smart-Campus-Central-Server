@@ -42,11 +42,57 @@ export function VoicePicker({ catalogue, language, voice, onChange, idPrefix }: 
   );
 }
 
+/** The id of a chime, or "" for none. The list comes from the server. */
+export type Chime = string;
+
+interface ChimeCatalogue {
+  groups: { id: string; label: string }[];
+  chimes: { id: string; group: string; label: string }[];
+}
+
+/** The chime played before a voice, with a button to hear it. The louder and rougher, the more serious. */
+export function ChimePicker({ value, onChange, idPrefix }: { value: Chime; onChange: (next: Chime) => void; idPrefix: string }) {
+  const catalogue = useFetch<ChimeCatalogue>("/intercom/chimes");
+  const [playing, setPlaying] = useState(false);
+  function listen() {
+    if (!value) return;
+    setPlaying(true);
+    const audio = new Audio(`/api/intercom/chimes/${value}`);
+    audio.onended = () => setPlaying(false);
+    audio.onerror = () => setPlaying(false);
+    void audio.play().catch(() => setPlaying(false));
+  }
+  return (
+    <div className="flex flex-wrap items-end gap-3">
+      <Field label="Chime before the voice" htmlFor={`${idPrefix}-chime`}>
+        <Select id={`${idPrefix}-chime`} value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">None</option>
+          {catalogue.data?.groups.map((group) => (
+            <optgroup key={group.id} label={group.label}>
+              {catalogue.data!.chimes
+                .filter((c) => c.group === group.id)
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
+            </optgroup>
+          ))}
+        </Select>
+      </Field>
+      <Button type="button" variant="outline" disabled={!value || playing} onClick={listen} aria-label="Listen to the chime">
+        <Play /> {playing ? "Playing…" : "Listen"}
+      </Button>
+    </div>
+  );
+}
+
 /** Type a text, choose a voice, listen to it, then play it on the speakers of the chosen screens. */
 export function VoiceAnnouncement({ onSent }: { onSent: () => void }) {
   const voices = useFetch<VoiceCatalogue>("/intercom/voices");
   const [text, setText] = useState("");
   const [choice, setChoice] = useState({ language: "", voice: "" });
+  const [chime, setChime] = useState<Chime>("");
   const [targets, setTargets] = useState<TargetState>(emptyTargetState());
   const [clipUrl, setClipUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState<"preview" | "send" | null>(null);
@@ -71,7 +117,7 @@ export function VoiceAnnouncement({ onSent }: { onSent: () => void }) {
     setBusy("preview");
     setError(null);
     try {
-      const blob = await apiBlob("/intercom/speech/preview", { text, voice: choice.voice });
+      const blob = await apiBlob("/intercom/speech/preview", { text, voice: choice.voice, ...(chime && { chime }) });
       setClipUrl(URL.createObjectURL(blob));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate the voice");
@@ -88,7 +134,7 @@ export function VoiceAnnouncement({ onSent }: { onSent: () => void }) {
     setError(null);
     setNotice(null);
     try {
-      await api("/intercom/speech", { body: { text, voice: choice.voice, targets: chosen } });
+      await api("/intercom/speech", { body: { text, voice: choice.voice, ...(chime && { chime }), targets: chosen } });
       setNotice("Sent to the speakers.");
       onSent();
     } catch (err) {
@@ -142,6 +188,14 @@ export function VoiceAnnouncement({ onSent }: { onSent: () => void }) {
               voice={choice.voice}
               onChange={(next) => {
                 setChoice(next);
+                forget();
+              }}
+            />
+            <ChimePicker
+              idPrefix="v"
+              value={chime}
+              onChange={(next) => {
+                setChime(next);
                 forget();
               }}
             />

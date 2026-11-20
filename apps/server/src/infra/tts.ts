@@ -14,6 +14,8 @@ export interface SpeechRequest {
   language: string;
   /** 1 is the voice's natural pace. Left out for ordinary speech. */
   speed?: number;
+  /** Asked when the audio must be edited afterwards (a chime in front): WAV can be joined without a decoder. Default mp3. */
+  format?: "mp3" | "wav";
 }
 
 /**
@@ -51,7 +53,7 @@ export class OpenAiCompatibleTts implements TtsEngine {
     return this.options.voices;
   }
 
-  async synthesize({ text, voice, language, speed }: SpeechRequest): Promise<Buffer> {
+  async synthesize({ text, voice, language, speed, format }: SpeechRequest): Promise<Buffer> {
     const url = `${this.options.baseUrl.replace(/\/+$/, "")}/audio/speech`;
     let res: Response;
     try {
@@ -59,7 +61,7 @@ export class OpenAiCompatibleTts implements TtsEngine {
         method: "POST",
         headers: { "content-type": "application/json", ...(this.options.apiKey && { authorization: `Bearer ${this.options.apiKey}` }) },
         // `language` is ignored by engines that detect it from the text and honoured by those that need it.
-        body: JSON.stringify({ model: this.options.model, input: text, voice, language, response_format: "mp3", ...(speed !== undefined && { speed }) }),
+        body: JSON.stringify({ model: this.options.model, input: text, voice, language, response_format: format ?? "mp3", ...(speed !== undefined && { speed }) }),
         signal: AbortSignal.timeout(this.options.timeoutMs),
       });
     } catch {

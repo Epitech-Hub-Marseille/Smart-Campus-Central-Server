@@ -7,6 +7,7 @@ import { AssetModel } from "../../models/asset.js";
 import { AuditLogModel } from "../../models/auditLog.js";
 import { CommandModel } from "../../models/command.js";
 import { DeviceModel } from "../../models/device.js";
+import { readWav } from "../../lib/wav.js";
 import { fakeEngine, tinyWav } from "../../testing/fakeTts.js";
 import { startHarness, type ApiClient, type Harness } from "../../testing/harness.js";
 
@@ -174,3 +175,51 @@ describe("parseVoices", () => {
     expect(() => parseVoices(" , ")).toThrow(/at least one/);
   });
 });
+
+describe("chimes before a voice", () => {
+  const preview = (body: object) =>
+    operator.raw("POST", "/intercom/speech/preview", { body: Buffer.from(JSON.stringify(body)), headers: { "content-type": "application/json" } });
+
+  it("asks the engine for a WAV and puts the chosen chime in front of the voice", async () => {
+    const engine = fakeEngine({ pcm16: true });
+    setTtsEngine(engine);
+    const plain = readWav(Buffer.from(await (await preview({ text: "Bonjour", voice: "nova" })).arrayBuffer()))!;
+    const urgent = readWav(Buffer.from(await (await preview({ text: "Bonjour", voice: "nova", chime: "critical-buzwarn" })).arrayBuffer()))!;
+    expect(engine.calls[1]).toMatchObject({ format: "wav" });
+    expect(engine.calls[0]!.format).toBeUndefined();
+    expect(urgent.samples.length).toBeGreaterThan(plain.samples.length + 24_000);
+    expect(urgent.samples.slice(-plain.samples.length)).toEqual(plain.samples);
+  });
+
+  it("speaking with a chime stores the joined sound and sends it to the screens", async () => {
+    setTtsEngine(fakeEngine({ pcm16: true }));
+    const { deviceId } = await h.enrollDevice();
+    const res = await operator.request("POST", "/intercom/speech", { text: "Alerte", voice: "nova", chime: "warning-dadaa", targets: { devices: [deviceId] } });
+    expect(res.status).toBe(201);
+    const asset = await AssetModel.findOne();
+    expect(asset!.size).toBeGreaterThan(2 * 24_000);
+    expect((await CommandModel.findOne({ deviceId, type: "audio.play" }))!.payload).toMatchObject({ size: asset!.size });
+  });
+
+  it("sends the voice as it is when the engine cannot return a WAV, and refuses an unknown severity", async () => {
+    setTtsEngine(fakeEngine());
+    const res = await preview({ text: "Bonjour", voice: "nova", chime: "info-dudu" });
+    expect(res.status).toBe(200);
+    expect(Buffer.from(await res.arrayBuffer()).length).toBe(tinyWav().length + "Bonjour".length);
+    expect((await preview({ text: "Bonjour", chime: "loud" })).status).toBe(400);
+  });
+
+  it("lets the console pre-listen to each chime, for admins and operators only", async () => {
+    const ok = await operator.raw("GET", "/intercom/chimes/critical-deeoo");
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("content-type")).toBe("audio/wav");
+    expect(Buffer.from(await ok.arrayBuffer()).subarray(0, 4).toString()).toBe("RIFF");
+    expect((await operator.raw("GET", "/intercom/chimes/deafening")).status).toBe(400);
+    const catalogue = (await operator.request("GET", "/intercom/chimes")).body;
+    expect(catalogue.groups.map((g: { id: string }) => g.id)).toEqual(["info", "warning", "critical", "manual-override"]);
+    expect(catalogue.chimes).toHaveLength(11);
+    expect((await staff.raw("GET", "/intercom/chimes")).status).toBe(403);
+    expect((await staff.raw("GET", "/intercom/chimes/info-dudu")).status).toBe(403);
+  });
+});
+

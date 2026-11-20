@@ -113,7 +113,7 @@ export async function pushReservationsToDevice(deviceId: string, roomId: string)
   await enqueueCommand(deviceId, "reservations.set", { roomId, items: await doorReservations(roomId) });
 }
 
-async function syncReservations(roomId: string): Promise<void> {
+export async function syncReservations(roomId: string): Promise<void> {
   try {
     for (const device of await DeviceModel.find({ room: roomId, status: "active", type: "door" }, { deviceId: 1 })) {
       await pushReservationsToDevice(device.deviceId, roomId);

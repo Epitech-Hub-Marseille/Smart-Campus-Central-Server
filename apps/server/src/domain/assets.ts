@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
-import { ulid } from "@smartcampus/protocol";
+import { THEME_FONT_SLOTS, THEME_LIMITS, ulid } from "@smartcampus/protocol";
 import { deleteFile, saveFile } from "../infra/gridfs.js";
 import { HttpError } from "../lib/errors.js";
 import { recordAudit } from "../lib/audit.js";
 import { sniffAudio } from "../lib/audioSniff.js";
+import { sniffFont } from "../lib/fontSniff.js";
 import { sniffMedia } from "../lib/mediaSniff.js";
 import { AssetModel } from "../models/asset.js";
 import { assetUsage, pushForAsset } from "./screens.js";
+import { themesUsingAsset } from "./themes.js";
 import { CommandModel } from "../models/command.js";
 import type { PublicUser } from "../models/user.js";
 
@@ -60,6 +62,41 @@ export async function storeMediaAsset(data: Buffer, name: string, actor: Actor, 
   return asset;
 }
 
+/** Same again for a theme font. A font is parsed by every screen that wears the theme, so only known containers and a small size pass. */
+export async function storeFontAsset(data: Buffer, name: string, actor: Actor) {
+  if (data.length === 0) throw new HttpError(400, "The file is empty");
+  if (data.length > THEME_LIMITS.fontBytes) throw new HttpError(413, `A font may be at most ${THEME_LIMITS.fontBytes / 1024 / 1024} MB`);
+  const format = sniffFont(data);
+  if (!format) throw new HttpError(415, "Unsupported font. Use WOFF2, WOFF, TTF or OTF");
+
+  const assetId = ulid();
+  const gridFsId = await saveFile(`${assetId}.${format.extension}`, data);
+  const asset = await AssetModel.create({
+    assetId,
+    name,
+    kind: "font",
+    mime: format.mime,
+    extension: format.extension,
+    size: data.length,
+    sha256: createHash("sha256").update(data).digest("hex"),
+    gridFsId,
+    createdByName: actor.name,
+  });
+  await recordAudit(actor, "asset.upload", { type: "asset", id: assetId }, { name, kind: "font", size: data.length });
+  return asset;
+}
+
+/**
+ * A font from a theme bundle: the one already in the library when the same bytes were uploaded before (so importing
+ * a theme twice, or two themes sharing a font, stores it once), otherwise a new one.
+ */
+export async function ensureFontAsset(data: Buffer, name: string, actor: Actor) {
+  const sha256 = createHash("sha256").update(data).digest("hex");
+  const existing = await AssetModel.findOne({ kind: "font", sha256 });
+  if (existing) return { asset: existing, reused: true };
+  return { asset: await storeFontAsset(data, name, actor), reused: false };
+}
+
 /** Folder names are one level, plain text: they are labels, not paths. */
 export const normalizeFolder = (value: unknown): string => (typeof value === "string" ? value.replace(/[\\/]/g, " ").trim().slice(0, 40) : "");
 
@@ -80,7 +117,8 @@ export async function updateMediaAsset(assetId: string, changes: { name?: string
 export async function replaceMediaAsset(assetId: string, data: Buffer, actor: Actor) {
   const asset = await AssetModel.findOne({ assetId });
   if (!asset) throw new HttpError(404, "File not found");
-  if (asset.kind === "audio") throw new HttpError(400, "Only images and videos can be replaced here");
+  // A font is never replaced under a theme: the same id with other bytes would change screens with no new theme version.
+  if (asset.kind === "audio" || asset.kind === "font") throw new HttpError(400, "Only images and videos can be replaced here");
   if (data.length === 0) throw new HttpError(400, "The file is empty");
   const format = sniffMedia(data);
   if (!format) throw new HttpError(415, "Unsupported file. Use PNG, JPEG, WebP, GIF, MP4 or WebM");
@@ -105,7 +143,7 @@ export const assetRefOf = (a: { assetId: string; sha256: string; size: number; m
 });
 
 export async function deleteAsset(assetId: string, actor: Actor): Promise<void> {
-  const uses = await assetUsage(assetId);
+  const uses = [...(await assetUsage(assetId)), ...(await themesUsingAsset(assetId)).map((name) => ({ name }))];
   if (uses.length) throw new HttpError(409, `This file is used by ${[...new Set(uses.map((u) => u.name))].join(", ")}. Remove it there first`);
   const asset = await AssetModel.findOneAndDelete({ assetId });
   if (!asset) throw new HttpError(404, "Asset not found");
@@ -125,5 +163,7 @@ export const wasAssetSentTo = (deviceId: string, assetId: string) =>
       // A Faculty screen downloads what its playlist or its logo names, and nothing else.
       { type: "carousel.set", "payload.scenes.tiles.settings.asset.assetId": assetId },
       { type: "faculty.config.set", "payload.config.site.logo.assetId": assetId },
+      // A door unit or a Faculty screen downloads the fonts of the theme it was sent.
+      { type: "theme.set", $or: THEME_FONT_SLOTS.map((slot) => ({ [`payload.theme.fonts.${slot}.assetId`]: assetId })) },
     ],
   });

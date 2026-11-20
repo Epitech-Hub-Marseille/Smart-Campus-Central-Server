@@ -4,7 +4,7 @@ import { ErrorText, Field } from "@/components/Field";
 import { PageHeader } from "@/components/PageHeader";
 import { TemplatePicker } from "@/components/TemplatePicker";
 import { emptyTargetState, TargetPicker, toTargets, type TargetState } from "@/components/TargetPicker";
-import { VoicePicker } from "@/components/VoiceAnnouncement";
+import { ChimePicker, VoicePicker, type Chime } from "@/components/VoiceAnnouncement";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -159,6 +159,7 @@ function ScheduleDialog({ statuses, onClose, onSaved }: { statuses: RoomStatusDe
   const [kind, setKind] = useState<"text" | "voice">("text");
   const [content, setContent] = useState({ title: "", text: "", priority: "info" as AnnouncePriority, expires: "" });
   const [choice, setChoice] = useState({ language: "", voice: "" });
+  const [chime, setChime] = useState<Chime>("");
   const [trigger, setTrigger] = useState<TriggerKind>("daily");
   const [when, setWhen] = useState({ at: toLocalInput(new Date(Date.now() + 3_600_000)), time: "08:00", days: [1, 2, 3, 4, 5], status: "closed", roomId: "" });
   const [roomScreens, setRoomScreens] = useState(true);
@@ -194,7 +195,7 @@ function ScheduleDialog({ statuses, onClose, onSaved }: { statuses: RoomStatusDe
           name,
           content:
             kind === "voice"
-              ? { kind, text: content.text, voice: picked }
+              ? { kind, text: content.text, voice: picked, ...(chime && { chime }) }
               : { kind, title: content.title, text: content.text, priority: content.priority, ...(content.expires && { expiresAfterMinutes: Number(content.expires) }) },
           trigger: triggerBody,
           ...(chosen && { targets: chosen }),
@@ -267,7 +268,12 @@ function ScheduleDialog({ statuses, onClose, onSaved }: { statuses: RoomStatusDe
                 </Field>
               </div>
             ) : (
-              catalogue && <VoicePicker idPrefix="sc" catalogue={catalogue} language={pickedLanguage} voice={picked} onChange={setChoice} />
+              catalogue && (
+                <>
+                  <VoicePicker idPrefix="sc" catalogue={catalogue} language={pickedLanguage} voice={picked} onChange={setChoice} />
+                  <ChimePicker idPrefix="sc" value={chime} onChange={setChime} />
+                </>
+              )
             )}
           </fieldset>
 

@@ -6,8 +6,8 @@ const assetSchema = new Schema(
     // ULID, the id devices receive in `audio.play`.
     assetId: { type: String, required: true, unique: true },
     name: { type: String, required: true, trim: true },
-    // audio: the sound library (InterCom). image and video: the content library of the Faculty screens.
-    kind: { type: String, enum: ["audio", "image", "video"], default: "audio", required: true },
+    // audio: the sound library (InterCom). image and video: the content library of the Faculty screens. font: files for themes.
+    kind: { type: String, enum: ["audio", "image", "video", "font"], default: "audio", required: true },
     mime: { type: String, required: true },
     extension: { type: String, required: true },
     size: { type: Number, required: true },
