@@ -336,6 +336,17 @@ describe("emergencies", () => {
       });
     });
 
+    it("marks the read-out of an emergency, a test included, so a screen can play it through its alarm", async () => {
+      setTtsEngine(fakeEngine());
+      const test = await h.enrollDevice();
+      const { body } = await trigger(operator, { kind: "fire", targets: { devices: [test.deviceId] }, testMode: true, speak: true });
+      expect((await CommandModel.findOne({ deviceId: test.deviceId, type: "audio.play" }))?.payload).toMatchObject({ urgent: false, emergencyId: body.id });
+      // An ordinary announcement carries no such mark.
+      const other = await h.enrollDevice();
+      await operator.request("POST", "/intercom/speech", { text: "Hello", targets: { devices: [other.deviceId] } });
+      expect((await CommandModel.findOne({ deviceId: other.deviceId, type: "audio.play" }))?.payload).not.toHaveProperty("emergencyId");
+    });
+
     it("a test is not urgent, so quiet hours still apply", async () => {
       setTtsEngine(fakeEngine());
       const { deviceId } = await h.enrollDevice();
