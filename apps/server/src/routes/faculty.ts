@@ -2,6 +2,7 @@ import { AVAILABILITIES, FACULTY_LIMITS, ANNOUNCE_PRIORITIES, SCENE_LAYOUTS, SER
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, requireRole } from "../auth/middleware.js";
+import { currentEventsFor, type CurrentEvent } from "../domain/eventAvailability.js";
 import { applyScreenChange, buildFacultyContent, effectiveAvailability, notifyFacultyChanged } from "../domain/faculty.js";
 import {
   BUILTIN_SCENES,
@@ -96,8 +97,8 @@ facultyRouter.delete("/news/:id", canWrite, async (req, res) => {
 
 // ---- Staff availability -------------------------------------------------------------------
 
-const staffDto = (u: UserDoc) => {
-  const effective = effectiveAvailability(u);
+const staffDto = (u: UserDoc, event?: CurrentEvent) => {
+  const effective = effectiveAvailability(u, new Date(), event);
   return {
     id: u.id,
     name: u.name,
@@ -113,7 +114,8 @@ const staffDto = (u: UserDoc) => {
 facultyRouter.get("/staff", async (req, res) => {
   const { service } = z.object({ service: z.enum(SERVICES).optional() }).parse(req.query);
   const users = await UserModel.find({ disabled: false, service: service ?? { $in: [...SERVICES] } }).sort({ name: 1 }).limit(500);
-  res.json({ items: users.map(staffDto), screenLimit: FACULTY_LIMITS.staff });
+  const events = await currentEventsFor(users.map((u) => u.id));
+  res.json({ items: users.map((u) => staffDto(u, events.get(u.id))), screenLimit: FACULTY_LIMITS.staff });
 });
 
 const availabilityInput = z.object({
@@ -126,12 +128,15 @@ const availabilityInput = z.object({
 async function setAvailability(user: UserDoc, input: z.infer<typeof availabilityInput>) {
   if (!user.service) throw new HttpError(409, "This person is not listed on the Faculty screens. Ask an administrator to assign a service.");
   if (input.until && input.until.getTime() <= Date.now()) throw new HttpError(400, "until must be in the future");
-  // "Available" needs no note or end time: keeping them would show stale text on the screens.
+  // "Available" needs no note: keeping it would show stale text on the screens. Said while in an event of a portal, it is the
+  // person overriding the automatic "busy", and lasts until the event ends.
   const available = input.status === "available";
+  const event = available ? (await currentEventsFor([user.id])).get(user.id) : undefined;
   user.set("availability", {
     status: input.status,
     note: available ? "" : input.note,
     ...(!available && input.until && { until: input.until }),
+    ...(event && { until: event.end }),
     updatedAt: new Date(),
   });
   await user.save();
@@ -149,7 +154,7 @@ facultyRouter.put("/availability/me", async (req, res) => {
 facultyRouter.get("/availability/me", async (req, res) => {
   const user = await UserModel.findById(req.user!.id);
   if (!user) throw new HttpError(404, "User not found");
-  res.json({ listed: Boolean(user.service), ...(user.service && staffDto(user)) });
+  res.json({ listed: Boolean(user.service), ...(user.service && staffDto(user, (await currentEventsFor([user.id])).get(user.id))) });
 });
 
 /** An admin or operator can set it for someone (a visitor at the desk, someone who forgot). */

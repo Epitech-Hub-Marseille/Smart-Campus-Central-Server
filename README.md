@@ -50,6 +50,7 @@ The single `pnpm-lock.yaml` at the root is committed.
 | Schedules and templates | Announcements that send themselves once, daily, weekly, or when a room changes status; a library of reusable announcement texts |
 | Faculty screens | The information board of the reference design (events of the day, booked rooms, announcements, a news ticker) plus staff availability (updated by the staff themselves, filtered by service), with carousel, clock, date and weather widgets. The screen application is in its own repository, `SmartCampus-FacultyScreens` |
 | Faculty screens | Screens grouped and configured by level (default, group, screen: the most specific wins, field by field). A carousel of scenes, each a layout of tiles: news, staff, reservations, images, videos, texts, web pages, live radio, live video streams and YouTube. A media library with folders, rename, replace and usage |
+| Portal integrations | Plugins read events from ENT, student portals and administration systems (first: Epitech MY). Events become reservations, the people they name are matched to or registered as staff and shown as busy during the event |
 | Reservations | Book a room without conflicts; the door screen shows the next booking and Faculty screens list the day |
 | Display config | Layout, theme, visible elements and night sleep per screen, validated by the shared schema, duplicated to several screens |
 | Audit | `auditLogs` entries for device approval/revocation, status changes, announcements, emergency alerts, uploads, broadcasts and configuration changes (the viewer is #27) |
@@ -143,6 +144,32 @@ default use it). The kind and type are decided from the file's first bytes: PNG,
 audio-only MP4. A file that a playlist or a logo uses cannot be deleted; the error says where. File references (`assetId`, `sha256`, `size`, `mime`) are
 built from the library on the server, never from the request. A screen downloads a file with a signed request, as for sounds, and only a file its own
 carousel or logo names (`audio.play`, `carousel.set` and `faculty.config.set` are what authorise a download).
+
+## Portal integrations
+
+The campus reads the events of its ENT, student portals and administration systems through **plugins**, one per kind of portal. A plugin does one
+thing: given a time window, it returns the events of its portal in a fixed shape (`apps/server/src/integrations/types.ts`). Everything after that is the same for
+every plugin (`domain/integrations.ts`), so a new portal is one file in `integrations/plugins/` and one line in `integrations/registry.ts`.
+
+- **What a reading does.** Events from the start of today to `horizonDays` ahead (14 by default) are stored; an event the portal stops listing is cancelled. An event whose
+  place matches a room (by room name or code, ignoring case and accents, or by an alias set on the integration) becomes a **reservation** under `source: integration:<id>`,
+  so doors and Faculty screens show it with no change. **Places** that match no room can be settled in the console (Integrations, the door icon): choose
+  the room, make a room for the place (name and code from the portal, in a chosen building and floor, kind guessed from words like "Réunion" or "Bureau"), or say it is not
+  a room. A choice applies at once to the events already read. An integration can also **create the missing rooms by itself** at every reading (`autoCreateRooms`, in
+  `autoCreateBuildingId` on `autoCreateFloor`). Video calls ("distanciel", "Teams", "Zoom"…) are never rooms. Endpoints: `GET` and `PUT /api/integrations/:id/places`. These are written without the conflict check of a person's booking, since the portal is the truth.
+- **People.** An event's organiser and attendees are matched to accounts by email, then by an exact name that only one account has. The reservation then carries that
+  person's name. Someone with an email and no account is **registered** (no password, no way to sign in, source `integration:<id>`, listed on the Faculty screens under the
+  integration's service) unless the integration turns that off or the event names more than 10 people (a class list, not staff).
+- **Busy.** Someone named by an event that is running shows as **busy** on the Faculty screens, with the title of the event, until it ends. What the person or an administrator
+  sets always wins, including "available", which then lasts until the event ends. The screens are told when someone starts or finishes an event.
+- **Settings are secret.** A setting that is a key (the link of a calendar export holds a token) is stored encrypted (`lib/secretBox.ts`) and never returned. Only administrators
+  change integrations; operators can see what was read. A reading's error is kept on the integration and never repeats a secret. Nothing here is open to API keys.
+- **Timer.** Enabled integrations are read when due (`intervalMinutes`, 5 to 1440) by the scheduler; `POST /api/integrations/:id/sync` reads one now. A reading holds a lock so two never overlap.
+- **Endpoints** (`/api/integrations`): `GET /plugins`, `GET /`, `POST /`, `PATCH /:id`, `DELETE /:id` (removes its events and reservations, keeps registered accounts), `POST /:id/sync`,
+  `GET /events`. Console: Administration, Integrations.
+- **Epitech MY** (`epitech-my`): the calendar export of the MY platform, an iCalendar file (`https://my.epitech.eu/api/events/calendar/<token>?campus=MAR`). It only talks to
+  `my.epitech.eu` over https, follows no redirects and caps the size of the file. **That file carries no names of teachers or students**, only the title, time, rooms and a
+  description, so with it alone no account is registered and nobody is shown busy: people appear when a calendar names them (organiser and attendee lines, or an email in the text).
 
 ## Reservations
 

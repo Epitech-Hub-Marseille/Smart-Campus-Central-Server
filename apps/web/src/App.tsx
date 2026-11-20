@@ -21,6 +21,7 @@ import { DeviceDetailPage } from "@/pages/DeviceDetailPage";
 import { DevicesPage } from "@/pages/DevicesPage";
 import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { ImportPage } from "@/pages/ImportPage";
+import { IntegrationsPage } from "@/pages/IntegrationsPage";
 import { IntercomPage } from "@/pages/IntercomPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
@@ -66,6 +67,7 @@ export default function App() {
                 </Route>
                 <Route path="/students" element={<StudentsPage />} />
                 <Route path="/import" element={<ImportPage />} />
+                <Route path="/integrations" element={<IntegrationsPage />} />
               </Route>
             </Route>
           </Route>

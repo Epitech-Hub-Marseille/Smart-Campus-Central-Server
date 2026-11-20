@@ -12,6 +12,10 @@ const reservationSchema = new Schema(
     organizerName: { type: String, required: true },
     status: { type: String, enum: ["active", "cancelled"], default: "active", required: true },
     cancelledByName: { type: String },
+    // Set for a reservation that mirrors an event of a portal (see domain/integrations.ts): the portal is the truth, so it is
+    // kept in step with it and is not subject to the conflict check of a booking.
+    source: { type: String },
+    externalKey: { type: String },
   },
   { timestamps: true },
 );
@@ -19,6 +23,7 @@ const reservationSchema = new Schema(
 // The conflict check and the "next reservation of this room" query both read by room and start.
 reservationSchema.index({ room: 1, status: 1, start: 1 });
 reservationSchema.index({ start: 1, status: 1 });
+reservationSchema.index({ externalKey: 1 }, { unique: true, partialFilterExpression: { externalKey: { $type: "string" } } });
 
 export const ReservationModel = model("Reservation", reservationSchema);
 

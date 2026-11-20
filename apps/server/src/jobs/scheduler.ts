@@ -1,4 +1,5 @@
 import { notifyFacultyChanged } from "../domain/faculty.js";
+import { refreshEventAvailability, runDueIntegrations } from "../domain/integrations.js";
 import { refreshAllDoorReservations } from "../domain/reservations.js";
 import { runDueSchedules } from "../domain/schedules.js";
 
@@ -25,7 +26,15 @@ export function startScheduler() {
     }
   };
 
-  const tick = setInterval(guarded("scheduler", () => runDueSchedules()), SCHEDULER_TICK_MS);
+  const tick = setInterval(
+    guarded("scheduler", async () => {
+      await runDueSchedules();
+      // Portals are read when due; people who have just started or finished an event change status on the screens.
+      await runDueIntegrations();
+      await refreshEventAvailability();
+    }),
+    SCHEDULER_TICK_MS,
+  );
   const refresh = setInterval(
     guarded("refresh", async () => {
       await refreshAllDoorReservations();

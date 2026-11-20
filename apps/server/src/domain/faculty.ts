@@ -4,6 +4,7 @@ import { NewsModel } from "../models/news.js";
 import { ReservationModel } from "../models/reservation.js";
 import { UserModel } from "../models/user.js";
 import { enqueueCommand } from "./commands.js";
+import { currentEventsFor, type CurrentEvent } from "./eventAvailability.js";
 import { pushCarousel, pushScreenConfig, resolveScreens } from "./screens.js";
 
 /** A snapshot is rebuilt whenever something changes and on every connection, so a day without news is the longest it must outlive. */
@@ -35,6 +36,8 @@ export async function buildFacultyContent(service: FacultyConfig["service"], now
       .populate<{ room: { code: string; name?: string; building?: { name: string } } }>({ path: "room", select: "code name building", populate: { path: "building", select: "name" } }),
   ]);
 
+  // Whoever is in an event of a portal shows as busy for its length, unless they said otherwise themselves.
+  const events = await currentEventsFor(staff.map((u) => String(u._id)), now);
   return {
     news: news
       .sort((a, b) => (PRIORITY_RANK[a.priority] ?? 2) - (PRIORITY_RANK[b.priority] ?? 2) || b.publishedAt.getTime() - a.publishedAt.getTime())
@@ -47,7 +50,7 @@ export async function buildFacultyContent(service: FacultyConfig["service"], now
         publishedAt: n.publishedAt.getTime(),
         ...(n.expiresAt && { expiresAt: n.expiresAt.getTime() }),
       })),
-    staff: staff.map((u) => effectiveAvailability(u, now)),
+    staff: staff.map((u) => effectiveAvailability(u, now, events.get(String(u._id)))),
     reservations: reservations.map((r) => ({
       id: r.reservationId,
       // The room code, as the board shows it ("A101"): room codes already carry their building.
@@ -61,19 +64,26 @@ export async function buildFacultyContent(service: FacultyConfig["service"], now
   };
 }
 
-/** A status with a time limit that has passed means the person is available again. */
+/**
+ * What a person shows on the screens. What they (or an administrator) set wins: a status with a time limit that has passed means
+ * it no longer counts. Without one, being in an event of a portal shows them as busy until it ends. An "available" that has an end
+ * time is the person saying they are free in spite of the event, until it is over.
+ */
 export function effectiveAvailability(
   user: { _id: unknown; name: string; jobTitle?: string | null; service?: string | null; availability?: { status: string; note?: string | null; until?: Date | null } | null },
   now = new Date(),
+  event?: CurrentEvent,
 ) {
   const a = user.availability;
   const lapsed = Boolean(a?.until && a.until.getTime() <= now.getTime());
+  const said = a && !lapsed && (a.status !== "available" || Boolean(a.until));
+  const common = { id: String(user._id), name: cut(user.name, 80), service: user.service as Service, ...(user.jobTitle && { jobTitle: cut(user.jobTitle, 60) }) };
+  if (!said && event) {
+    return { ...common, availability: "busy" as PayloadOf<"faculty.content.set">["staff"][number]["availability"], note: cut(event.title, 60), until: event.end.getTime() };
+  }
   const status = !a || lapsed ? "available" : a.status;
   return {
-    id: String(user._id),
-    name: cut(user.name, 80),
-    service: user.service as Service,
-    ...(user.jobTitle && { jobTitle: cut(user.jobTitle, 60) }),
+    ...common,
     availability: status as PayloadOf<"faculty.content.set">["staff"][number]["availability"],
     ...(a && !lapsed && a.note && { note: cut(a.note, 60) }),
     ...(a && !lapsed && a.until && status !== "available" && { until: a.until.getTime() }),

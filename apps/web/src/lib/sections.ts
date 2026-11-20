@@ -12,6 +12,7 @@ import {
   Megaphone,
   MonitorPlay,
   Newspaper,
+  Plug,
   Palette,
   Radio,
   Settings2,
@@ -123,6 +124,7 @@ export const SECTIONS: Section[] = [
     items: [
       { to: "/staff", label: "Staff", icon: Users, description: "Accounts, groups and cards." },
       { to: "/students", label: "Students", icon: GraduationCap, description: "Student enrolment and card registration." },
+      { to: "/integrations", label: "Integrations", icon: Plug, description: "Read events from an ENT, a student portal or an administration system." },
       { to: "/import", label: "CSV import", icon: FileUp, description: "Bulk import of rooms and people." },
       { to: "/api-keys", label: "API keys", icon: KeyRound, description: "Let other applications use the API with only the scopes they need.", adminOnly: true },
     ],
