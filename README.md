@@ -85,6 +85,7 @@ decision, so the shipped implementation speaks the OpenAI `POST /audio/speech` A
   server, so the devices play one file and need no change. To join them without a decoder the server asks the engine for `wav`; an engine that does not return a
   16-bit PCM WAV, or an unknown chime, gets the voice sent as it is, with a warning in the log. `GET /api/intercom/chimes` lists them by group and
   `GET /api/intercom/chimes/:id` returns one to pre-listen to.
+  **Emergencies** read their alert aloud after a chime of their own for each kind (`EMERGENCY_CHIMES` in `domain/emergencies.ts`: fire Buzz warning, bomb Dee-oo, nuclear Important manual override, biohazard Manual override, seismic Da-de-da, power Da-da C), and the all-clear after the calm information chime Doop.
 
 **Schedules** (`/schedules`, admins and operators). A schedule announces a text (on screens) or a voice, at a time or on an event:
 

@@ -7,7 +7,10 @@ import { EmergencyModel } from "../../models/emergency.js";
 import { EmergencyConfirmationModel } from "../../models/emergencyConfirmation.js";
 import { setTtsEngine } from "../../infra/tts.js";
 import { config } from "../../config.js";
-import { fakeEngine } from "../../testing/fakeTts.js";
+import { createHash } from "node:crypto";
+import { ALL_CLEAR_CHIME, EMERGENCY_CHIMES } from "../emergencies.js";
+import { prependChime } from "../../lib/chimes.js";
+import { fakeEngine, speechWav } from "../../testing/fakeTts.js";
 
 let h: Harness;
 let operator: ApiClient;
@@ -288,7 +291,7 @@ describe("emergencies", () => {
         const { deviceId } = await h.enrollDevice();
         const { body } = await trigger(operator, { kind: "fire", targets: { devices: [deviceId] } });
         await operator.request("POST", `/emergencies/${body.id}/clear`, { message: "All clear.", speak: true });
-        expect(engine.calls[0]).toEqual({ text: "All clear.", voice: "alloy", language: "en" });
+        expect(engine.calls[0]).toEqual({ text: "All clear.", voice: "alloy", language: "en", format: "wav" });
       });
 
       it("tells the console which voice reads emergencies, and ordinary speech never gets a pace", async () => {
@@ -300,6 +303,35 @@ describe("emergencies", () => {
         const { deviceId } = await h.enrollDevice();
         await operator.request("POST", "/intercom/speech", { text: "Hello", targets: { devices: [deviceId] } });
         expect(engine.calls[0]).not.toHaveProperty("speed");
+      });
+    });
+
+    describe("chimes", () => {
+      const sha = (data: Buffer) => createHash("sha256").update(data).digest("hex");
+      const heard = async (deviceId: string) => (await CommandModel.findOne({ deviceId, type: "audio.play" }))?.payload as { sha256: string };
+
+      it("opens the read-out of each kind of emergency with a chime of its own", async () => {
+        setTtsEngine(fakeEngine({ pcm16: true }));
+        const seen = new Set<string>();
+        for (const kind of Object.keys(EMERGENCY_CHIMES) as (keyof typeof EMERGENCY_CHIMES)[]) {
+          const { deviceId } = await h.enrollDevice();
+          await trigger(operator, { kind, targets: { devices: [deviceId] }, speak: true });
+          const { sha256 } = await heard(deviceId);
+          // The same voice with this kind's chime in front, and nothing else, was broadcast.
+          expect(sha256, kind).toBe(sha(prependChime(speechWav(), EMERGENCY_CHIMES[kind])!));
+          seen.add(sha256);
+        }
+        expect(seen.size).toBe(6);
+        expect(new Set(Object.values(EMERGENCY_CHIMES)).size).toBe(6);
+      });
+
+      it("reads the all-clear after a calm chime, not an alarm chime", async () => {
+        setTtsEngine(fakeEngine({ pcm16: true }));
+        const { deviceId } = await h.enrollDevice();
+        const { body } = await trigger(operator, { kind: "fire", targets: { devices: [deviceId] }, speak: false });
+        await operator.request("POST", `/emergencies/${body.id}/clear`, { message: "All clear.", speak: true });
+        expect(Object.values(EMERGENCY_CHIMES)).not.toContain(ALL_CLEAR_CHIME);
+        expect((await heard(deviceId)).sha256).toBe(sha(prependChime(speechWav(), ALL_CLEAR_CHIME)!));
       });
     });
 

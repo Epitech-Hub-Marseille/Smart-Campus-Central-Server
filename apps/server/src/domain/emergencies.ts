@@ -11,6 +11,7 @@ import type { PublicUser } from "../models/user.js";
 import { consoleBus } from "../gateway/consoleBus.js";
 import { enqueueCommand } from "./commands.js";
 import { config } from "../config.js";
+import type { ChimeId } from "../lib/chimes.js";
 import { MAX_SPEECH_CHARS, emergencyVoiceId, speak } from "./intercom.js";
 import { requireTargetDevices, type Targets } from "./targeting.js";
 
@@ -122,10 +123,26 @@ export async function triggerEmergency(input: EmergencyInput, actor: Actor) {
   // After the visual alert and the alarm are queued, so a slow or broken voice engine never delays them.
   if (input.speak) {
     // Said twice first: the opening words of an alarm are the ones people miss while a door slams.
-    await speakAlert(emergency, `Attention. Attention. ${emergency.title}. ${emergency.instructions}`, { devices: deviceIds }, input.voice, !input.testMode, actor);
+    await speakAlert(emergency, `Attention. Attention. ${emergency.title}. ${emergency.instructions}`, { devices: deviceIds }, input.voice, !input.testMode, actor, true, EMERGENCY_CHIMES[emergency.kind]);
   }
   return emergency;
 }
+
+/**
+ * The chime that goes before the read-out of each kind of emergency, so the kind is recognised before a word is said. They are
+ * all different, and the harshest sounds belong to the kinds that need people to move at once.
+ */
+export const EMERGENCY_CHIMES = {
+  fire: "critical-buzwarn",
+  bomb: "critical-deeoo",
+  nuclear: "important-manual-override",
+  biohazard: "manual-override",
+  seismic: "warning-dadeda",
+  power: "warning-dadac",
+} as const satisfies Record<EmergencyKind, ChimeId>;
+
+/** The all-clear is the same for every kind: a calm information chime, nothing that sounds like the alarm that just ended. */
+export const ALL_CLEAR_CHIME: ChimeId = "info-doop";
 
 /** Reads text aloud on the speakers and records whether it worked on the emergency. Never throws. */
 async function speakAlert(
@@ -137,6 +154,7 @@ async function speakAlert(
   actor: Actor,
   /** The start of an alert is read slowly and gravely, the all-clear at a natural pace. */
   grave = true,
+  chime?: ChimeId,
 ): Promise<void> {
   if (!ttsEngine()) {
     emergency.voiceStatus = "unavailable";
@@ -148,6 +166,7 @@ async function speakAlert(
           // A voice chosen for this alert wins; otherwise the emergency voice, so every alert sounds the same.
           voice: voice ?? emergencyVoiceId(),
           ...(grave && { speed: config.TTS_EMERGENCY_SPEED }),
+          ...(chime && { chime }),
           title: `Emergency: ${emergency.title}`,
           targets,
           urgent,
@@ -199,7 +218,7 @@ export async function clearEmergency(emergencyId: string, actor: Actor, input: C
 
   // Only the screens that were still sounding hear the all-clear. In a test nothing needs to override quiet hours.
   if (input.speak && input.message && showing.length) {
-    await speakAlert(emergency, input.message, { devices: showing.map((d) => d.deviceId) }, input.voice, !emergency.testMode, actor, false);
+    await speakAlert(emergency, input.message, { devices: showing.map((d) => d.deviceId) }, input.voice, !emergency.testMode, actor, false, ALL_CLEAR_CHIME);
   }
   return emergency;
 }
