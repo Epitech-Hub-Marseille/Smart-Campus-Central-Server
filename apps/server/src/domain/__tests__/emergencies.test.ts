@@ -10,6 +10,7 @@ import { config } from "../../config.js";
 import { createHash } from "node:crypto";
 import { ALL_CLEAR_CHIME, EMERGENCY_CHIMES } from "../emergencies.js";
 import { prependChime } from "../../lib/chimes.js";
+import { louden } from "../../lib/speechGain.js";
 import { fakeEngine, speechWav } from "../../testing/fakeTts.js";
 
 let h: Harness;
@@ -317,8 +318,8 @@ describe("emergencies", () => {
           const { deviceId } = await h.enrollDevice();
           await trigger(operator, { kind, targets: { devices: [deviceId] }, speak: true });
           const { sha256 } = await heard(deviceId);
-          // The same voice with this kind's chime in front, and nothing else, was broadcast.
-          expect(sha256, kind).toBe(sha(prependChime(speechWav(), EMERGENCY_CHIMES[kind])!));
+          // The same voice, made louder, with this kind's chime in front, and nothing else, was broadcast.
+          expect(sha256, kind).toBe(sha(prependChime(louden(speechWav())!, EMERGENCY_CHIMES[kind])!));
           seen.add(sha256);
         }
         expect(seen.size).toBe(6);
@@ -331,7 +332,7 @@ describe("emergencies", () => {
         const { body } = await trigger(operator, { kind: "fire", targets: { devices: [deviceId] }, speak: false });
         await operator.request("POST", `/emergencies/${body.id}/clear`, { message: "All clear.", speak: true });
         expect(Object.values(EMERGENCY_CHIMES)).not.toContain(ALL_CLEAR_CHIME);
-        expect((await heard(deviceId)).sha256).toBe(sha(prependChime(speechWav(), ALL_CLEAR_CHIME)!));
+        expect((await heard(deviceId)).sha256).toBe(sha(prependChime(louden(speechWav())!, ALL_CLEAR_CHIME)!));
       });
     });
 

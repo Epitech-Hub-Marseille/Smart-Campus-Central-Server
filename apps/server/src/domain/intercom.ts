@@ -1,6 +1,7 @@
 import { ulid } from "@smartcampus/protocol";
 import { HttpError } from "../lib/errors.js";
 import { sniffAudio } from "../lib/audioSniff.js";
+import { louden } from "../lib/speechGain.js";
 import { prependChime, type ChimeId } from "../lib/chimes.js";
 import { recordAudit } from "../lib/audit.js";
 import { AnnouncementModel } from "../models/announcement.js";
@@ -72,6 +73,8 @@ export interface SpeechInput {
   speed?: number;
   /** A chime played before the voice (see `lib/chimes.ts`). Left out for none. */
   chime?: ChimeId;
+  /** Brought to a forceful level (see `lib/speechGain.ts`): for emergency read-outs. */
+  loud?: boolean;
 }
 
 /**
@@ -111,9 +114,11 @@ export async function previewSpeech(input: SpeechInput): Promise<{ data: Buffer;
     voice: voice.id,
     language: voice.language,
     ...(input.speed !== undefined && { speed: input.speed }),
-    ...(input.chime && { format: "wav" as const }),
+    ...((input.chime || input.loud) && { format: "wav" as const }),
   });
-  const data = input.chime ? withChime(spoken, input.chime) : spoken;
+  // The voice is made louder before the chime goes in front of it, so the chime keeps its own level.
+  const voiced = input.loud ? (louden(spoken) ?? spoken) : spoken;
+  const data = input.chime ? withChime(voiced, input.chime) : voiced;
   const format = sniffAudio(data);
   if (!format) throw new HttpError(502, "The text-to-speech engine returned something that is not audio");
   return { data, mime: format.mime };
