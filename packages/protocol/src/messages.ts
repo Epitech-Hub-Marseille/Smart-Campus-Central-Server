@@ -278,6 +278,8 @@ export const audioPlay = msg(
     size: z.number().int().positive(),
     /** Plays at full volume and ignores quiet hours. Only for emergencies. */
     urgent: z.boolean().default(false),
+    /** Set on the read-out of an emergency, a test included (a test is not `urgent`): a screen plays it through its alarm. */
+    emergencyId: z.string().min(1).max(64).optional(),
   }),
 );
 

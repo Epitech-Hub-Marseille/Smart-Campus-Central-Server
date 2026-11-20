@@ -23,7 +23,7 @@ export const AUDIO_COMMAND_TTL_SECONDS = 5 * 60;
 
 /** Plays a stored sound on the chosen devices. Offline devices only get it if they return within the TTL. */
 export async function broadcastAudio(
-  input: { assetId: string; title?: string; targets: Targets; /** Emergencies only: full volume, ignores quiet hours. */ urgent?: boolean },
+  input: { assetId: string; title?: string; targets: Targets; /** Emergencies only: full volume, ignores quiet hours. */ urgent?: boolean; /** The emergency this is the read-out of (a test too): screens play it through their alarm. */ emergencyId?: string },
   actor: Actor,
 ) {
   const asset = await AssetModel.findOne({ assetId: input.assetId });
@@ -51,6 +51,7 @@ export async function broadcastAudio(
         sha256: asset.sha256,
         size: asset.size,
         ...(input.urgent && { urgent: true }),
+        ...(input.emergencyId && { emergencyId: input.emergencyId }),
       },
       AUDIO_COMMAND_TTL_SECONDS,
     );
@@ -75,6 +76,8 @@ export interface SpeechInput {
   chime?: ChimeId;
   /** Brought to a forceful level (see `lib/speechGain.ts`): for emergency read-outs. */
   loud?: boolean;
+  /** Set for the read-out of an emergency, so a screen can tell it from an ordinary announcement. */
+  emergencyId?: string;
 }
 
 /**
@@ -136,5 +139,5 @@ export async function speak(
   const snippet = input.text.length > 60 ? `${input.text.slice(0, 57)}...` : input.text;
   const title = input.title?.trim() || `Voice: ${snippet}`;
   const asset = await storeAudioAsset(data, title.slice(0, 100), actor);
-  return broadcastAudio({ assetId: asset.assetId, title, targets: input.targets, urgent: input.urgent }, actor);
+  return broadcastAudio({ assetId: asset.assetId, title, targets: input.targets, urgent: input.urgent, emergencyId: input.emergencyId }, actor);
 }

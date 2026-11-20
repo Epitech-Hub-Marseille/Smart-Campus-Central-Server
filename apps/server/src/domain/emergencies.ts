@@ -168,6 +168,7 @@ async function speakAlert(
           ...(grave && { speed: config.TTS_EMERGENCY_SPEED }),
           ...(chime && { chime }),
           loud: true,
+          emergencyId: emergency.emergencyId,
           title: `Emergency: ${emergency.title}`,
           targets,
           urgent,
