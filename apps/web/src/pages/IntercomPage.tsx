@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AudioRecorder } from "@/components/AudioRecorder";
 import { ErrorText, Field } from "@/components/Field";
 import { VoiceAnnouncement } from "@/components/VoiceAnnouncement";
+import { LiveAnnouncement } from "@/components/LiveAnnouncement";
 import { PageHeader } from "@/components/PageHeader";
 import { emptyTargetState, TargetPicker, toTargets, type TargetState } from "@/components/TargetPicker";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +36,8 @@ export function IntercomPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="InterCom" description="Record or import a sound, or type a text for a voice to read, then play it on the speakers of the screens you choose." />
+
+      <LiveAnnouncement />
 
       <NewSound onSaved={assets.reload} />
 
