@@ -10,7 +10,9 @@ import {
 } from "@smartcampus/protocol";
 import type { RawData, WebSocket } from "ws";
 import { decideCard } from "../domain/badges.js";
-import { closeGrant, runMaintenanceAction } from "../domain/maintenance.js";
+import { announcer, closeGrant, runMaintenanceAction } from "../domain/maintenance.js";
+import { answerCall, dropCallsOf, hangUp, listPeers, relayCallAudio, startCall } from "../domain/calls.js";
+import { endLive, pushLive, startLive } from "../domain/liveVoice.js";
 import { markAcked, markNacked, pendingCommands } from "../domain/commands.js";
 import { refreshFacultyOnConnect } from "../domain/faculty.js";
 import { pushThemes } from "../domain/themes.js";
@@ -40,6 +42,8 @@ export function handleDeviceSocket(ws: WebSocket, ip: string, opts: DeviceSocket
   let stage: "hello" | "auth" | "live" = "hello";
   let conn: DeviceConnection | null = null;
   let pingTimer: NodeJS.Timeout | undefined;
+  /** The announcement this terminal is speaking, if any (its message id). */
+  let liveStreamId: string | undefined;
 
   const handshakeTimer = setTimeout(
     () => ws.close(CloseCode.HandshakeTimeout, "handshake timeout"),
@@ -145,11 +149,62 @@ export function handleDeviceSocket(ws: WebSocket, ip: string, opts: DeviceSocket
       case "maintenance.action":
         await answerAction(connection, msg);
         break;
+      case "live.start":
+        await beginAnnouncement(connection, msg.id);
+        break;
+      case "live.chunk":
+        if (liveStreamId && !pushLive(liveStreamId, Buffer.from(msg.payload.data, "base64"))) liveStreamId = undefined;
+        break;
+      case "live.end":
+        if (liveStreamId) endLive(liveStreamId);
+        liveStreamId = undefined;
+        break;
+      case "call.list":
+        if (connection.open) connection.send("call.directory", { ref: msg.id, peers: await listPeers(connection.deviceId) });
+        break;
+      case "call.request": {
+        const result = await startCall(connection.deviceId, msg.payload.target, msg.id);
+        // Only a refusal is answered here: a call that starts is announced to both sides by `call.state`.
+        if (!result.ok && connection.open) connection.send("call.state", { callId: msg.id, state: result.state ?? "unavailable" });
+        break;
+      }
+      case "call.answer":
+        await answerCall(connection.deviceId, msg.payload.callId, msg.payload.accept);
+        break;
+      case "call.hangup":
+        hangUp(connection.deviceId, msg.payload.callId);
+        break;
+      case "call.audio":
+        relayCallAudio(connection.deviceId, msg.payload.callId, Buffer.from(msg.payload.data, "base64"));
+        break;
       case "event.badge":
         // Door access rules arrive with M4. For now a card either opens the maintenance menu
         // (admin/operator), is collected for enrolment (registration mode) or is just recognised.
         await answerBadge(connection, msg);
         break;
+    }
+  }
+
+  async function beginAnnouncement(connection: DeviceConnection, ref: string) {
+    const answer = (result: { ok: boolean; error?: string; deviceCount?: number }) => connection.open && connection.send("intercom.result", { ref, kind: "announce", ...result });
+    const who = await announcer(connection.deviceId);
+    if (!who.ok) return void answer({ ok: false, error: who.error });
+    try {
+      // Everyone but this terminal: it has the microphone, so playing the voice back into it would make it howl.
+      const started = await startLive(
+        { kind: "device", id: connection.deviceId, name: who.actor.name, actor: who.actor },
+        { all: true },
+        ref,
+        () => {
+          // Cut by the server (time limit, silence): tell the terminal so it stops listening and shows it is off the air.
+          if (liveStreamId === ref) liveStreamId = undefined;
+          if (connection.open) connection.send("live.end", { streamId: ref });
+        },
+      );
+      liveStreamId = started.streamId;
+      answer({ ok: true, deviceCount: started.deviceCount });
+    } catch (err) {
+      answer({ ok: false, error: err instanceof Error ? err.message : "Could not start the announcement" });
     }
   }
 
@@ -181,6 +236,8 @@ export function handleDeviceSocket(ws: WebSocket, ip: string, opts: DeviceSocket
   ws.on("close", () => {
     clearTimeout(handshakeTimer);
     clearInterval(pingTimer);
+    if (liveStreamId) endLive(liveStreamId);
+    if (conn) dropCallsOf(conn.deviceId);
     if (conn) {
       closeGrant(conn.deviceId);
       registry.unregister(conn);

@@ -21,6 +21,8 @@ export interface ApiClient {
   request(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }>;
   /** A valid authenticator code for this user right now (admins and operators have two-factor on, like in production). */
   code(): Promise<string>;
+  /** The session cookie, for a WebSocket that authenticates like the console (null when signed out). */
+  cookie: string | null;
   /** Raw request, for uploads and downloads. */
   raw(method: string, path: string, init?: { body?: Buffer; headers?: Record<string, string> }): Promise<Response>;
 }
@@ -48,6 +50,7 @@ export async function startHarness() {
     });
 
   const client = (cookie: string | null, email?: string): ApiClient => ({
+    cookie,
     raw: raw(cookie),
     async code() {
       // The same code cannot be used twice, as in production; a test that needs several simply asks again.

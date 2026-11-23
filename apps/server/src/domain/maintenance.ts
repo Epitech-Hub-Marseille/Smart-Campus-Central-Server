@@ -30,12 +30,32 @@ export function closeGrant(deviceId: string): void {
   grants.delete(deviceId);
 }
 
+/**
+ * Who may speak on the air from this terminal: the person whose card opened the menu, if it is still open and they are still an
+ * administrator or operator. Slides the grant, like a menu action does, so a long announcement does not outlive its card.
+ */
+export async function announcer(deviceId: string, now = Date.now()): Promise<{ ok: true; actor: { id: string; name: string } } | { ok: false; error: string }> {
+  const grant = grants.get(deviceId);
+  if (!grant || grant.expiresAt <= now) {
+    grants.delete(deviceId);
+    return { ok: false, error: "Present the card again to make an announcement" };
+  }
+  const user = await UserModel.findById(grant.userId);
+  if (!user || user.disabled || roleOf(user.groups as Group[]) === "staff") {
+    grants.delete(deviceId);
+    return { ok: false, error: "This card no longer allows announcements" };
+  }
+  grant.expiresAt = now + GRANT_TTL_MS;
+  return { ok: true, actor: { id: grant.userId, name: grant.userName } };
+}
+
 /** The menu shown with an accepted card: every status the person may choose, and whether they may revoke. */
 export async function menuFor(groups: readonly Group[]) {
   const statuses = await RoomStatusModel.find({}, { key: 1, label: 1, color: 1, icon: 1 }).sort({ builtIn: -1, label: 1 }).lean();
   return {
     statuses: statuses.map((s) => ({ key: s.key, label: s.label, color: s.color, icon: s.icon })),
     canRevoke: roleOf(groups as Group[]) === "admin",
+    canAnnounce: roleOf(groups as Group[]) !== "staff",
   };
 }
 
