@@ -344,3 +344,9 @@ corner radius from 0 to 32. Whatever a theme leaves out keeps the app's own look
   state when a device connects. Only devices whose theme actually changed are told. A theme that is assigned cannot be deleted.
 - **Console** (Devices, Themes): colour pickers, font, size and corner controls, CSS, import and export of the JSON and CSS files, a preview of both
   apps (the Faculty one in a frame with no scripts and no network), and the assignments.
+
+## License
+
+Released under the [PolyForm Noncommercial License 1.0.0](LICENSE). You may use, modify and share the
+software for any noncommercial purpose; commercial use, including selling it, is not permitted.
+This is a source-available license, not an open-source one.
