@@ -331,6 +331,69 @@ export const accessAclSync = msg(
   }),
 );
 
+/** Live voice (a microphone announcement) is 16-bit little-endian mono PCM at this rate: enough for speech, light on the link. */
+export const LIVE_SAMPLE_RATE = 16_000;
+/** Largest chunk of live audio, in bytes of PCM (a quarter of a second): a frame is far below `MAX_FRAME_BYTES` once encoded. */
+export const LIVE_MAX_CHUNK_BYTES = 8_000;
+/** An announcement is cut off after this long, so a forgotten microphone cannot hold every screen. */
+export const LIVE_MAX_SECONDS = 180;
+
+const liveChunkData = z
+  .string()
+  .max(Math.ceil((LIVE_MAX_CHUNK_BYTES * 4) / 3) + 4)
+  .regex(/^[A-Za-z0-9+/]*={0,2}$/, "expected base64");
+
+/**
+ * A live microphone announcement begins. Never queued: a voice that arrives late is meaningless, so a screen that is offline
+ * simply misses it. The attention chime is sent as the first audio of the stream, so a screen needs to know nothing about it.
+ */
+export const liveStart = msg(
+  "live.start",
+  z.object({ streamId: z.string().regex(ULID_REGEX), sampleRate: z.literal(LIVE_SAMPLE_RATE), from: z.string().max(100) }),
+);
+
+/** A slice of the voice, in order. `data` is base64 PCM16. */
+export const liveChunk = msg("live.chunk", z.object({ streamId: z.string().regex(ULID_REGEX), data: liveChunkData }));
+
+export const liveEnd = msg("live.end", z.object({ streamId: z.string().regex(ULID_REGEX) }));
+
+/** Answer to a device's `live.start`. Not queued, like `card.result`. */
+export const intercomResult = msg(
+  "intercom.result",
+  z.object({
+    ref: z.string().regex(ULID_REGEX),
+    kind: z.literal("announce"),
+    ok: z.boolean(),
+    error: z.string().max(200).optional(),
+    /** Screens the announcement reaches (the emitter itself is never one of them). */
+    deviceCount: z.number().int().nonnegative().optional(),
+  }),
+);
+
+/** Where a call between two door terminals stands. */
+export const CALL_STATES = ["ringing", "active", "declined", "ended", "busy", "unavailable", "timeout"] as const;
+export type CallState = (typeof CALL_STATES)[number];
+
+const callId = z.string().regex(ULID_REGEX);
+
+/** The terminals a door may call, with whether each is connected. Answer to `call.list`. */
+export const callDirectory = msg(
+  "call.directory",
+  z.object({
+    ref: z.string().regex(ULID_REGEX),
+    peers: z.array(z.object({ id: z.string().min(1).max(40), name: z.string().max(100), online: z.boolean() })).max(200),
+  }),
+);
+
+/** Another terminal is calling this one. Never queued: a call that rings late is a call nobody is waiting for. */
+export const callIncoming = msg("call.incoming", z.object({ callId, from: z.string().max(100) }));
+
+/** The call changed state. `peer` names the other terminal. Sent to both sides, never queued. */
+export const callStateMessage = msg("call.state", z.object({ callId, state: z.enum(CALL_STATES), peer: z.string().max(100).optional() }));
+
+/** The other side's voice during an active call, same format as live voice. */
+export const callAudio = msg("call.audio", z.object({ callId, data: liveChunkData }));
+
 /** What the server decided about a card that was presented to a reader. */
 export const CARD_OUTCOMES = [
   "maintenance",
@@ -355,6 +418,8 @@ export const maintenanceMenu = z.object({
     .max(50),
   /** Only administrators may take the terminal out of service. */
   canRevoke: z.boolean(),
+  /** Whether the person may make a live announcement from this terminal. */
+  canAnnounce: z.boolean().optional(),
 });
 
 /**
@@ -423,6 +488,30 @@ export const maintenanceAction = msg(
   z.object({ action: z.enum(MAINTENANCE_ACTIONS), status: statusKey.optional() }),
 );
 
+/**
+ * The person who opened the menu with their card starts speaking to every screen. The server accepts it only inside that
+ * card's grant. The audio follows as `live.chunk`, ended by `live.end`; the terminal's own speaker stays silent.
+ * The id of this message is the id of the stream.
+ */
+export const deviceLiveStart = msg("live.start", z.object({}));
+export const deviceLiveChunk = msg("live.chunk", z.object({ data: liveChunkData }));
+export const deviceLiveEnd = msg("live.end", z.object({}));
+
+/** Asks for the terminals this one may call. */
+export const callList = msg("call.list", z.object({}));
+
+/** Calls another terminal. The id of this message is the id of the call. The other side rings and may answer or decline. */
+export const callRequest = msg("call.request", z.object({ target: z.string().min(1).max(40) }));
+
+/** The called terminal answers: it accepts (the microphones open on both sides) or declines. */
+export const callAnswer = msg("call.answer", z.object({ callId, accept: z.boolean() }));
+
+/** Either side ends the call. */
+export const callHangup = msg("call.hangup", z.object({ callId }));
+
+/** This terminal's microphone during an active call, passed on to the other side. */
+export const deviceCallAudio = msg("call.audio", z.object({ callId, data: liveChunkData }));
+
 // ---- Unions ----------------------------------------------------------------------------
 
 export const serverMessage = z.discriminatedUnion("type", [
@@ -445,9 +534,31 @@ export const serverMessage = z.discriminatedUnion("type", [
   cardResult,
   maintenanceResult,
   registrationModeSet,
+  liveStart,
+  liveChunk,
+  liveEnd,
+  intercomResult,
+  callDirectory,
+  callIncoming,
+  callStateMessage,
+  callAudio,
 ]);
 
-export const deviceMessage = z.discriminatedUnion("type", [ack, nack, stateReport, eventBadge, maintenanceAction]);
+export const deviceMessage = z.discriminatedUnion("type", [
+  ack,
+  nack,
+  stateReport,
+  eventBadge,
+  maintenanceAction,
+  deviceLiveStart,
+  deviceLiveChunk,
+  deviceLiveEnd,
+  callList,
+  callRequest,
+  callAnswer,
+  callHangup,
+  deviceCallAudio,
+]);
 
 export type ServerMessage = z.infer<typeof serverMessage>;
 export type DeviceMessage = z.infer<typeof deviceMessage>;
